@@ -141,7 +141,7 @@ export function ScripturePreviewSheet({
                 onClick={() => setSelectedIdx(idx)}
                 className={`tactile-btn h-8 shrink-0 rounded-full border px-3 text-xs font-bold ${
                   idx === selectedIdx
-                    ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-white'
+                    ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--ink-on-accent)]'
                     : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--ink-secondary)]'
                 }`}
               >
@@ -192,7 +192,7 @@ export function ScripturePreviewSheet({
                 });
                 onClose();
               }}
-              className="tactile-btn inline-flex h-11 items-center gap-2 rounded-xl bg-[var(--accent-primary)] px-4 text-xs font-bold text-white shadow-[var(--shadow-tactile)] hover:bg-[var(--accent-primary-hover)]"
+              className="tactile-btn inline-flex h-11 items-center gap-2 rounded-xl bg-[var(--accent-primary)] px-4 text-xs font-bold text-[var(--ink-on-accent)] shadow-[var(--shadow-tactile)] hover:bg-[var(--accent-primary-hover)]"
             >
               <span>Read {activePassage.bookName} {activePassage.chapter} in Bible</span>
               <ArrowSquareRight size={16} weight="bold" />

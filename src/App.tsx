@@ -11,8 +11,12 @@ import { usePreferences } from './hooks/usePreferences';
 export function App() {
   const {
     prefs,
-    toggleTheme,
+    setThemeId,
+    setCustomAccent,
+    setFontPreset,
     stepReadingScale,
+    setReadingScale,
+    resetReadingScale,
     canDecreaseFont,
     canIncreaseFont,
     setActiveTab,
@@ -32,17 +36,23 @@ export function App() {
   } | null>(null);
 
   return (
-    <div className="min-h-dvh bg-[var(--bg-canvas)] text-[var(--ink-primary)]">
+    <div className="min-h-dvh text-[var(--ink-primary)]">
       <TopBar
-        theme={prefs.theme}
-        onToggleTheme={toggleTheme}
+        themeId={prefs.themeId}
+        customAccent={prefs.customAccent}
+        onSelectTheme={setThemeId}
+        onSelectCustomAccent={setCustomAccent}
         readingScale={prefs.readingScale}
+        fontPreset={prefs.fontPreset}
         onStepFont={stepReadingScale}
+        onSetScale={setReadingScale}
+        onResetScale={resetReadingScale}
+        onSelectFontPreset={setFontPreset}
         canDecreaseFont={canDecreaseFont}
         canIncreaseFont={canIncreaseFont}
       />
 
-      <main className="mx-auto w-full max-w-4xl px-4 pb-24">
+      <main className="mx-auto w-full max-w-4xl px-4 pb-28">
         {prefs.activeTab === 'hymnal' && (
           <HymnalTab
             entries={hymnal.entries}

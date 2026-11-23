@@ -126,7 +126,7 @@ export function QuarterlyArchiveModal({
                     </p>
                   </div>
                   {active && (
-                    <span className="shrink-0 rounded-full bg-[var(--accent-primary)] px-2.5 py-0.5 text-[10px] font-bold text-white">
+                    <span className="shrink-0 rounded-full bg-[var(--accent-primary)] px-2.5 py-0.5 text-[10px] font-bold text-[var(--ink-on-accent)]">
                       Active
                     </span>
                   )}

@@ -170,7 +170,7 @@ export function BibleTab({
               title="Toggle side-by-side translation comparison"
               className={`tactile-btn inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold ${
                 compareMode
-                  ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-white shadow-[var(--shadow-tactile)]'
+                  ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-[var(--shadow-tactile)]'
                   : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--ink-secondary)] hover:border-[var(--border-strong)]'
               }`}
             >

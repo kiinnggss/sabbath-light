@@ -255,7 +255,7 @@ export function SabbathSchoolTab({
               {quarterlyMeta?.title || 'Loading Quarterly...'} ·{' '}
               {quarterlyMeta?.human_date || selectedQuarterlyId}
             </p>
-            <h2 className="mt-1 text-xl font-bold tracking-tight text-[var(--ink-primary)] leading-snug">
+            <h2 className="font-display mt-1 text-xl font-bold tracking-tight text-[var(--ink-primary)] leading-snug">
               {lessonDetail?.lesson.id === 'introduction'
                 ? lessonDetail.lesson.title
                 : lessonDetail
@@ -358,7 +358,7 @@ export function SabbathSchoolTab({
           ) : dayRead ? (
             <div className="space-y-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2 px-1">
-                <h3 className="text-lg font-bold text-[var(--ink-primary)]">
+                <h3 className="font-display text-lg font-bold text-[var(--ink-primary)]">
                   {dayRead.title}
                 </h3>
                 <span className="text-xs font-medium text-[var(--ink-muted)]">

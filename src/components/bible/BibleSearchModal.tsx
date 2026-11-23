@@ -94,7 +94,7 @@ export function BibleSearchModal({
           <button
             type="submit"
             disabled={loading || !query.trim()}
-            className="tactile-btn h-11 rounded-xl bg-[var(--accent-primary)] px-4 text-xs font-bold text-white shadow-[var(--shadow-tactile)] disabled:opacity-45"
+            className="tactile-btn h-11 rounded-xl bg-[var(--accent-primary)] px-4 text-xs font-bold text-[var(--ink-on-accent)] shadow-[var(--shadow-tactile)] disabled:opacity-45"
           >
             {loading ? 'Searching...' : 'Search'}
           </button>

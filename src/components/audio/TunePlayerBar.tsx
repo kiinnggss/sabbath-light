@@ -47,7 +47,7 @@ export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
   return (
     <section
       aria-label="Hymn Tune Player"
-      className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-1/2 z-30 w-[calc(100%-1.5rem)] max-w-2xl -translate-x-1/2 rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3.5 py-3 shadow-[0_-4px_20px_rgba(19,6,3,0.12)]"
+      className="fixed bottom-[calc(5.15rem+env(safe-area-inset-bottom))] left-1/2 z-30 w-[calc(100%-1.5rem)] max-w-2xl -translate-x-1/2 rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3.5 py-3 shadow-[0_-4px_20px_rgba(19,6,3,0.12)]"
     >
       <div className="flex items-center gap-3">
         {/* Chunky Yoto-inspired Play/Pause */}
@@ -55,7 +55,7 @@ export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
           type="button"
           onClick={handlePlayPause}
           aria-label={playback.isPlaying ? 'Pause hymn tune' : 'Play hymn tune'}
-          className="tactile-btn flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-primary)] text-white shadow-[var(--shadow-tactile)] hover:bg-[var(--accent-primary-hover)]"
+          className="tactile-btn flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-[var(--shadow-tactile)] hover:bg-[var(--accent-primary-hover)]"
         >
           {playback.isPlaying ? (
             <Pause size={22} weight="fill" />

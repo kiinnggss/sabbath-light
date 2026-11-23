@@ -108,7 +108,7 @@ export default defineConfig(({ mode }) => {
               options: {
                 cacheName: 'google-fonts-cache',
                 expiration: {
-                  maxEntries: 30,
+                  maxEntries: 80,
                   maxAgeSeconds: 60 * 60 * 24 * 365,
                 },
                 cacheableResponse: { statuses: [0, 200] },

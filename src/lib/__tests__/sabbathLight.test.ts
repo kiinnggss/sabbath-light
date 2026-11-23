@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { FONT_PRESETS, resolveFontPresetId } from '../../data/fonts';
 import type { HymnalEntry } from '../../data/hymnalTypes';
+import { getContrastTextColor, normalizeHex, resolveThemeId, THEMES } from '../../data/themes';
 import { sanitizeBollsVerseText } from '../bibleApi';
 import { extractJumpNumber, filterAndSearchHymnal } from '../fuzzySearch';
 import {
@@ -145,5 +147,40 @@ describe('fuzzySearch hymnal', () => {
     expect(filterAndSearchHymnal(sampleEntries, 'Lobe den', 'hymns', [])[0].number).toBe(1);
     expect(filterAndSearchHymnal(sampleEntries, '', 'readings', [])).toHaveLength(1);
     expect(filterAndSearchHymnal(sampleEntries, '', 'favorites', [462])).toHaveLength(1);
+  });
+});
+
+describe('themes and font presets', () => {
+  it('provides 11 themes with only the 3 curated video-downloader palettes', () => {
+    const ids = THEMES.map((t) => t.id);
+    expect(THEMES).toHaveLength(11);
+    expect(ids).toEqual(expect.arrayContaining(['soul-velvet', 'fitzgerald-print', 'paw-pop']));
+
+    for (const removed of [
+      'porcelain-citrus',
+      'oskar-coral',
+      'midnight-violet',
+      'matcha-kyoto',
+      'carbon-mechanic',
+    ]) {
+      expect(ids).not.toContain(removed);
+    }
+  });
+
+  it('migrates legacy light/dark theme keys and computes accessible accent ink', () => {
+    expect(resolveThemeId('light')).toBe('daylight');
+    expect(resolveThemeId('dark')).toBe('nightlight');
+    expect(resolveThemeId('unknown-theme')).toBe('daylight');
+
+    expect(normalizeHex('b64f1b')).toBe('#B64F1B');
+    expect(normalizeHex('#abc')).toBe('#AABBCC');
+    expect(getContrastTextColor('#E48E58')).toBe('#130603');
+    expect(getContrastTextColor('#B64F1B')).toBe('#FFFFFF');
+  });
+
+  it('exposes 6 curated font presets and validates unknown values', () => {
+    expect(FONT_PRESETS).toHaveLength(6);
+    expect(resolveFontPresetId('fast-and-loose')).toBe('fast-and-loose');
+    expect(resolveFontPresetId('not-a-font')).toBe('sanctuary');
   });
 });

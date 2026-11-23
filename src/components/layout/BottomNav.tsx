@@ -9,41 +9,67 @@ interface BottomNavProps {
 const NAV_ITEMS: Array<{
   id: ActiveTab;
   label: string;
-  sublabel: string;
   Icon: typeof MusicNotes;
+  pillBgVar: string;
+  pillInkVar: string;
 }> = [
-  { id: 'hymnal', label: 'Hymnal', sublabel: '1-920', Icon: MusicNotes },
-  { id: 'sabbath-school', label: 'Sabbath School', sublabel: 'Quarterly', Icon: BookOpenText },
-  { id: 'bible', label: 'Bible', sublabel: 'Multi-Version', Icon: BookBookmark },
+  {
+    id: 'hymnal',
+    label: 'Hymnal',
+    Icon: MusicNotes,
+    pillBgVar: 'var(--nav-pill-1-bg)',
+    pillInkVar: 'var(--nav-pill-1-ink)',
+  },
+  {
+    id: 'sabbath-school',
+    label: 'Sabbath School',
+    Icon: BookOpenText,
+    pillBgVar: 'var(--nav-pill-2-bg)',
+    pillInkVar: 'var(--nav-pill-2-ink)',
+  },
+  {
+    id: 'bible',
+    label: 'Bible',
+    Icon: BookBookmark,
+    pillBgVar: 'var(--nav-pill-3-bg)',
+    pillInkVar: 'var(--nav-pill-3-ink)',
+  },
 ];
 
 export function BottomNav({ activeTab, onSelectTab }: BottomNavProps) {
   return (
     <nav
       aria-label="Primary navigation"
-      className="fixed bottom-0 left-0 right-0 z-40 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] pb-[env(safe-area-inset-bottom)]"
+      className="pointer-events-none fixed bottom-0 left-0 right-0 z-40 px-4 pb-[calc(0.65rem+env(safe-area-inset-bottom))]"
     >
-      <div className="mx-auto grid h-16 max-w-3xl grid-cols-3 gap-1 px-2 py-1.5">
-        {NAV_ITEMS.map(({ id, label, sublabel, Icon }) => {
+      <div className="google-bottom-bar pointer-events-auto mx-auto flex h-[60px] w-full max-w-md items-center justify-between gap-1.5 rounded-full border border-[var(--dock-border)] bg-[var(--dock-bg)] px-2.5 py-2 shadow-[var(--dock-shadow)] backdrop-blur-md">
+        {NAV_ITEMS.map(({ id, label, Icon, pillBgVar, pillInkVar }) => {
           const isActive = activeTab === id;
           return (
             <button
               key={id}
               type="button"
               onClick={() => onSelectTab(id)}
+              aria-label={label}
               aria-current={isActive ? 'page' : undefined}
-              className={`tactile-btn flex min-h-[48px] flex-col items-center justify-center rounded-xl px-2 transition-colors ${
+              style={
                 isActive
-                  ? 'bg-[var(--accent-primary-soft)] text-[var(--accent-primary)]'
-                  : 'text-[var(--ink-secondary)] hover:bg-[var(--bg-recessed)]'
+                  ? { backgroundColor: pillBgVar, color: pillInkVar }
+                  : undefined
+              }
+              className={`google-bottom-bar-item tactile-btn flex h-11 min-w-[48px] items-center justify-center rounded-full transition-all duration-200 ${
+                isActive
+                  ? 'px-4 shadow-xs'
+                  : 'px-3.5 text-[var(--ink-secondary)] hover:bg-[var(--bg-recessed)] hover:text-[var(--ink-primary)]'
               }`}
             >
-              <Icon size={21} weight={isActive ? 'fill' : 'regular'} />
-              <span className="mt-0.5 text-[11px] font-bold leading-none tracking-tight">
+              <Icon size={22} weight={isActive ? 'fill' : 'regular'} className="shrink-0" />
+              <span
+                className={`nav-pill-label overflow-hidden whitespace-nowrap text-[13px] font-bold tracking-tight ${
+                  isActive ? 'ml-2 max-w-[148px] opacity-100' : 'ml-0 max-w-0 opacity-0'
+                }`}
+              >
                 {label}
-              </span>
-              <span className="mt-0.5 hidden text-[9px] font-medium text-[var(--ink-muted)] sm:block">
-                {sublabel}
               </span>
             </button>
           );

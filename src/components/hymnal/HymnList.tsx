@@ -55,7 +55,7 @@ export function HymnList({
               </p>
             </div>
           </div>
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-primary)] text-white">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-primary)] text-[var(--ink-on-accent)]">
             <ArrowRight size={18} weight="bold" />
           </span>
         </button>

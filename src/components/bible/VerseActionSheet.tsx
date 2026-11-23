@@ -151,7 +151,7 @@ export function VerseActionSheet({
               onClick={onToggleBookmark}
               className={`tactile-btn inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold ${
                 isBookmarked
-                  ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-white'
+                  ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--ink-on-accent)]'
                   : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--ink-primary)]'
               }`}
             >

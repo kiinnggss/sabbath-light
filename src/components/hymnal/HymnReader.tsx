@@ -92,7 +92,7 @@ export function HymnReader({
                 </span>
               )}
             </div>
-            <h2 className="mt-2 text-2xl font-bold tracking-tight text-[var(--ink-primary)] leading-tight">
+            <h2 className="font-display mt-2 text-2xl font-bold tracking-tight text-[var(--ink-primary)] leading-tight">
               {hymn.title}
             </h2>
             <p className="mt-1.5 text-sm font-medium text-[var(--ink-secondary)]">
@@ -115,7 +115,7 @@ export function HymnReader({
             onClick={() => setViewMode('lyrics')}
             className={`tactile-btn flex h-10 items-center justify-center gap-1.5 rounded-lg text-xs font-bold ${
               viewMode === 'lyrics'
-                ? 'bg-[var(--accent-primary)] text-white shadow-sm'
+                ? 'bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-sm'
                 : 'text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]'
             }`}
           >
@@ -129,7 +129,7 @@ export function HymnReader({
             onClick={() => setViewMode('story')}
             className={`tactile-btn flex h-10 items-center justify-center gap-1.5 rounded-lg text-xs font-bold ${
               viewMode === 'story'
-                ? 'bg-[var(--accent-primary)] text-white shadow-sm'
+                ? 'bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-sm'
                 : 'text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]'
             }`}
           >
@@ -156,7 +156,7 @@ export function HymnReader({
                   <span
                     className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider ${
                       verse.isRefrain
-                        ? 'bg-[var(--accent-primary)] text-white'
+                        ? 'bg-[var(--accent-primary)] text-[var(--ink-on-accent)]'
                         : 'bg-[var(--bg-recessed)] text-[var(--ink-secondary)]'
                     }`}
                   >

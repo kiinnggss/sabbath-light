@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 :root {
+  --font-display: 'Literata', Georgia, Cambria, serif;
   --font-ui: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-reading: 'Literata', Georgia, Cambria, 'Times New Roman', serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -19,6 +20,7 @@
   --ink-primary: #130603;
   --ink-secondary: #594539;
   --ink-muted: #725D50;
+  --ink-on-accent: #FFFFFF;
 
   --accent-primary: #B64F1B;
   --accent-primary-hover: #9A4013;
@@ -39,40 +41,17 @@
   --shadow-tactile: 0 2px 0 0 rgba(19, 6, 3, 0.10);
   --shadow-sheet: 0 -8px 28px rgba(19, 6, 3, 0.14);
   --nightlight-glow: none;
-}
 
-[data-theme="dark"] {
-  --bg-canvas: #15100D;
-  --bg-surface: #1F1814;
-  --bg-recessed: #29201A;
-  --bg-sand: #4A3B2E;
-  --bg-sand-soft: #31261E;
-  --border-subtle: #332820;
-  --border-strong: #4D3D30;
+  --dock-bg: rgba(255, 255, 255, 0.94);
+  --dock-border: #DDD4C3;
+  --dock-shadow: 0 10px 28px -8px rgba(19, 6, 3, 0.16), 0 2px 6px rgba(19, 6, 3, 0.06);
 
-  --ink-primary: #F5EFE6;
-  --ink-secondary: #C4B3A2;
-  --ink-muted: #9D8B7B;
-
-  --accent-primary: #D9652B;
-  --accent-primary-hover: #E5753C;
-  --accent-primary-soft: rgba(217, 101, 43, 0.20);
-  --accent-amber: #E6A63F;
-  --accent-amber-soft: rgba(230, 166, 63, 0.18);
-
-  --bezel-bg: #110B08;
-  --bezel-border: #3B2B21;
-  --bezel-dot-off: #2C1F18;
-  --bezel-dot-on: #F5B84E;
-
-  --hl-amber: rgba(230, 166, 63, 0.24);
-  --hl-terracotta: rgba(217, 101, 43, 0.24);
-  --hl-sand: rgba(157, 139, 123, 0.24);
-  --hl-olive: rgba(132, 152, 88, 0.24);
-
-  --shadow-tactile: 0 2px 0 0 rgba(0, 0, 0, 0.35);
-  --shadow-sheet: 0 -10px 32px rgba(0, 0, 0, 0.55);
-  --nightlight-glow: radial-gradient(ellipse 85% 45% at 50% 0%, rgba(230, 166, 63, 0.11), transparent 72%);
+  --nav-pill-1-bg: rgba(182, 79, 27, 0.14);
+  --nav-pill-1-ink: #9A4013;
+  --nav-pill-2-bg: rgba(230, 166, 63, 0.24);
+  --nav-pill-2-ink: #7C4B05;
+  --nav-pill-3-bg: rgba(88, 122, 68, 0.16);
+  --nav-pill-3-ink: #38542E;
 }
 
 *,
@@ -96,6 +75,55 @@ body {
   min-height: 100dvh;
   background-image: var(--nightlight-glow);
   background-repeat: no-repeat;
+  transition: background-color 240ms ease, color 180ms ease;
+}
+
+/* Curated studio ambient canvas textures */
+[data-theme="soul-velvet"] body {
+  background-image:
+    linear-gradient(to right, rgba(35, 37, 42, 0.06) 1px, transparent 1px),
+    radial-gradient(circle at 36% 24%, rgba(166, 61, 51, 0.14) 0%, transparent 50%);
+  background-size: 25% 100%, 100% 100%;
+  background-repeat: repeat-y, no-repeat;
+}
+
+[data-theme="fitzgerald-print"] body {
+  background-image: linear-gradient(to right, rgba(28, 27, 24, 0.05) 1px, transparent 1px);
+  background-size: 25% 100%;
+  background-repeat: repeat-y;
+}
+
+[data-theme="paw-pop"] body {
+  background-image: radial-gradient(rgba(27, 20, 14, 0.10) 1.3px, transparent 1.3px);
+  background-size: 22px 22px;
+  background-repeat: repeat;
+}
+
+/* Display typography */
+.font-display {
+  font-family: var(--font-display);
+}
+
+[data-font="fast-and-loose"] .font-display {
+  letter-spacing: 0.015em;
+  font-weight: 400;
+}
+
+[data-font="lsdx-studio"] .font-display {
+  letter-spacing: -0.025em;
+}
+
+[data-font="big-n-juicy"] .reading-prose {
+  line-height: calc(1.68 + (var(--reading-scale) - 1) * 0.14);
+}
+
+/* Google Bottom Bar shape refinement for archival print theme */
+[data-theme="fitzgerald-print"] .google-bottom-bar {
+  border-radius: 16px;
+}
+
+[data-theme="fitzgerald-print"] .google-bottom-bar-item {
+  border-radius: 11px;
 }
 
 /* Focus rings */
@@ -122,15 +150,6 @@ body {
   transform: scale(0.97);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .tactile-btn {
-    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
-  }
-  .tactile-btn:active:not(:disabled) {
-    transform: none;
-  }
-}
-
 /* Sheet enter animation */
 @keyframes sheetSlideUp {
   from {
@@ -147,9 +166,44 @@ body {
   animation: sheetSlideUp 220ms var(--ease-out) forwards;
 }
 
+/* Popover menu enter animation */
+@keyframes popoverDropIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.popover-enter {
+  transform-origin: top right;
+  animation: popoverDropIn 180ms var(--ease-out) forwards;
+}
+
+/* Google Bottom Bar label expansion */
+.nav-pill-label {
+  transition: max-width 240ms var(--ease-out), opacity 180ms ease, margin 240ms var(--ease-out);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .sheet-enter {
+  body {
+    transition: none;
+  }
+  .tactile-btn {
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  }
+  .tactile-btn:active:not(:disabled) {
+    transform: none;
+  }
+  .sheet-enter,
+  .popover-enter {
     animation: none;
+  }
+  .nav-pill-label {
+    transition: none;
   }
 }
 
@@ -188,7 +242,7 @@ input[type="range"].tactile-range::-moz-range-thumb {
 .ss-lesson-html h2,
 .ss-lesson-html h3,
 .ss-lesson-html h4 {
-  font-family: var(--font-ui);
+  font-family: var(--font-display);
   color: var(--ink-primary);
   font-weight: 700;
   line-height: 1.25;

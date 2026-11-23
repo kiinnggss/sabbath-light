@@ -75,7 +75,7 @@ export function HymnSearchHeader({
               onClick={() => onFilterModeChange(id)}
               className={`tactile-btn inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-semibold ${
                 active
-                  ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-white shadow-[var(--shadow-tactile)]'
+                  ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-[var(--shadow-tactile)]'
                   : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--ink-secondary)] hover:border-[var(--border-strong)]'
               }`}
             >
@@ -87,7 +87,7 @@ export function HymnSearchHeader({
                 <span
                   className={`rounded-full px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-bold ${
                     active
-                      ? 'bg-white/20 text-white'
+                      ? 'bg-black/15 text-[var(--ink-on-accent)]'
                       : 'bg-[var(--bg-recessed)] text-[var(--ink-secondary)]'
                   }`}
                 >

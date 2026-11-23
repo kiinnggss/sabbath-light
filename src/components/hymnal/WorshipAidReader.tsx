@@ -94,14 +94,14 @@ export function WorshipAidReader({
                 <button
                   type="button"
                   onClick={() => onOpenScripture(reading.scriptureRef!)}
-                  className="tactile-btn inline-flex items-center gap-1 rounded-full border border-[var(--accent-primary)]/40 bg-[var(--accent-primary-soft)] px-2.5 py-0.5 text-[11px] font-bold text-[var(--accent-primary)] hover:bg-[var(--accent-primary)] hover:text-white"
+                  className="tactile-btn inline-flex items-center gap-1 rounded-full border border-[var(--accent-primary)]/40 bg-[var(--accent-primary-soft)] px-2.5 py-0.5 text-[11px] font-bold text-[var(--accent-primary)] hover:bg-[var(--accent-primary)] hover:text-[var(--ink-on-accent)]"
                 >
                   <BookBookmark size={12} weight="duotone" />
                   <span>{reading.scriptureRef}</span>
                 </button>
               )}
             </div>
-            <h2 className="mt-2 text-2xl font-bold tracking-tight text-[var(--ink-primary)] leading-tight">
+            <h2 className="font-display mt-2 text-2xl font-bold tracking-tight text-[var(--ink-primary)] leading-tight">
               {reading.title}
             </h2>
             <p className="mt-1 text-xs font-medium text-[var(--ink-muted)]">
@@ -123,7 +123,7 @@ export function WorshipAidReader({
               onClick={() => setLayoutMode('responsive')}
               className={`tactile-btn flex h-9 items-center justify-center gap-1.5 rounded-lg text-xs font-bold ${
                 layoutMode === 'responsive'
-                  ? 'bg-[var(--accent-primary)] text-white shadow-sm'
+                  ? 'bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-sm'
                   : 'text-[var(--ink-secondary)]'
               }`}
             >
@@ -137,7 +137,7 @@ export function WorshipAidReader({
               onClick={() => setLayoutMode('unison')}
               className={`tactile-btn flex h-9 items-center justify-center gap-1.5 rounded-lg text-xs font-bold ${
                 layoutMode === 'unison'
-                  ? 'bg-[var(--accent-primary)] text-white shadow-sm'
+                  ? 'bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-sm'
                   : 'text-[var(--ink-secondary)]'
               }`}
             >
@@ -167,7 +167,7 @@ export function WorshipAidReader({
                 <span
                   className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider ${
                     isCongregation
-                      ? 'bg-[var(--accent-primary)] text-white'
+                      ? 'bg-[var(--accent-primary)] text-[var(--ink-on-accent)]'
                       : 'border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--ink-secondary)]'
                   }`}
                 >

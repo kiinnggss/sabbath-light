@@ -49,7 +49,7 @@ export function DaySwitcher({
                 onClick={() => onSelectDay(day.id)}
                 className={`tactile-btn flex min-h-[48px] min-w-[60px] flex-1 shrink-0 flex-col items-center justify-center rounded-xl border px-2.5 py-1.5 ${
                   active
-                    ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-white shadow-[var(--shadow-tactile)]'
+                    ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-[var(--shadow-tactile)]'
                     : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--ink-secondary)] hover:border-[var(--border-strong)]'
                 }`}
               >
@@ -60,7 +60,7 @@ export function DaySwitcher({
                 {subLabel && (
                   <span
                     className={`mt-0.5 text-[10px] font-medium leading-tight ${
-                      active ? 'text-white/85' : 'text-[var(--ink-muted)]'
+                      active ? 'text-[var(--ink-on-accent)] opacity-85' : 'text-[var(--ink-muted)]'
                     }`}
                   >
                     {subLabel}

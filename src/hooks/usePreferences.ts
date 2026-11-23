@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
+import {
+  applyFontPresetToDocument,
+  DEFAULT_FONT_PRESET,
+  resolveFontPresetId,
+  type FontPresetId,
+} from '../data/fonts';
+import {
+  applyThemeToDocument,
+  DEFAULT_THEME_ID,
+  normalizeHex,
+  resolveThemeId,
+  type ThemeId,
+} from '../data/themes';
 
-export type AppTheme = 'light' | 'dark';
 export type ActiveTab = 'hymnal' | 'sabbath-school' | 'bible';
 export type SabbathSchoolEdition = 'adult' | 'inverse' | 'cornerstone';
 export type BibleVersionId = 'KJV' | 'NKJV' | 'ESV' | 'NLT' | 'WEB' | 'BSB';
@@ -24,7 +36,9 @@ export interface BibleBookmark {
 }
 
 export interface UserPreferences {
-  theme: AppTheme;
+  themeId: ThemeId;
+  customAccent: string;
+  fontPreset: FontPresetId;
   readingScale: number;
   activeTab: ActiveTab;
   hymnalFavorites: number[];
@@ -41,7 +55,9 @@ export const READING_SCALE_STEPS = [0.88, 0.94, 1.0, 1.12, 1.25, 1.4] as const;
 const STORAGE_KEY = 'sabbath-light:prefs:v1';
 
 const DEFAULT_PREFS: UserPreferences = {
-  theme: 'light',
+  themeId: DEFAULT_THEME_ID,
+  customAccent: '',
+  fontPreset: DEFAULT_FONT_PRESET,
   readingScale: 1.0,
   activeTab: 'hymnal',
   hymnalFavorites: [1, 73, 108, 214, 462, 530],
@@ -57,10 +73,24 @@ function loadPreferences(): UserPreferences {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_PREFS;
-    const parsed = JSON.parse(raw) as Partial<UserPreferences>;
+    const parsed = JSON.parse(raw) as Partial<UserPreferences> & { theme?: string };
+    const resolvedThemeId = resolveThemeId(parsed.themeId ?? parsed.theme);
+    const resolvedAccent = normalizeHex(parsed.customAccent || '') ?? '';
+    const resolvedFont = resolveFontPresetId(parsed.fontPreset);
+    const resolvedScale =
+      typeof parsed.readingScale === 'number' &&
+      parsed.readingScale >= READING_SCALE_STEPS[0] - 0.01 &&
+      parsed.readingScale <= READING_SCALE_STEPS[READING_SCALE_STEPS.length - 1] + 0.01
+        ? parsed.readingScale
+        : DEFAULT_PREFS.readingScale;
+
     return {
       ...DEFAULT_PREFS,
       ...parsed,
+      themeId: resolvedThemeId,
+      customAccent: resolvedAccent,
+      fontPreset: resolvedFont,
+      readingScale: resolvedScale,
       hymnalFavorites: Array.isArray(parsed.hymnalFavorites)
         ? parsed.hymnalFavorites
         : DEFAULT_PREFS.hymnalFavorites,
@@ -93,17 +123,37 @@ export function usePreferences() {
   }, [prefs]);
 
   useEffect(() => {
-    const root = document.documentElement;
-    root.setAttribute('data-theme', prefs.theme);
-    root.style.setProperty('--reading-scale', String(prefs.readingScale));
-    const metaTheme = document.querySelector('meta[name="theme-color"]');
-    if (metaTheme) {
-      metaTheme.setAttribute('content', prefs.theme === 'dark' ? '#15100D' : '#F7F5F0');
-    }
-  }, [prefs.theme, prefs.readingScale]);
+    applyThemeToDocument(prefs.themeId, prefs.customAccent);
+  }, [prefs.themeId, prefs.customAccent]);
 
-  const toggleTheme = useCallback(() => {
-    setPrefs((prev) => ({ ...prev, theme: prev.theme === 'light' ? 'dark' : 'light' }));
+  useEffect(() => {
+    applyFontPresetToDocument(prefs.fontPreset);
+  }, [prefs.fontPreset]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--reading-scale', String(prefs.readingScale));
+  }, [prefs.readingScale]);
+
+  const setThemeId = useCallback((themeId: ThemeId) => {
+    setPrefs((prev) => ({
+      ...prev,
+      themeId: resolveThemeId(themeId),
+      customAccent: '',
+    }));
+  }, []);
+
+  const setCustomAccent = useCallback((hex: string) => {
+    setPrefs((prev) => ({
+      ...prev,
+      customAccent: hex ? normalizeHex(hex) ?? prev.customAccent : '',
+    }));
+  }, []);
+
+  const setFontPreset = useCallback((fontPreset: FontPresetId) => {
+    setPrefs((prev) => ({
+      ...prev,
+      fontPreset: resolveFontPresetId(fontPreset),
+    }));
   }, []);
 
   const stepReadingScale = useCallback((direction: -1 | 1) => {
@@ -113,6 +163,14 @@ export function usePreferences() {
       const nextIdx = Math.min(READING_SCALE_STEPS.length - 1, Math.max(0, currentIdx + direction));
       return { ...prev, readingScale: READING_SCALE_STEPS[nextIdx] };
     });
+  }, []);
+
+  const setReadingScale = useCallback((readingScale: number) => {
+    setPrefs((prev) => ({ ...prev, readingScale }));
+  }, []);
+
+  const resetReadingScale = useCallback(() => {
+    setPrefs((prev) => ({ ...prev, readingScale: 1.0 }));
   }, []);
 
   const setActiveTab = useCallback((activeTab: ActiveTab) => {
@@ -173,8 +231,12 @@ export function usePreferences() {
 
   return {
     prefs,
-    toggleTheme,
+    setThemeId,
+    setCustomAccent,
+    setFontPreset,
     stepReadingScale,
+    setReadingScale,
+    resetReadingScale,
     canDecreaseFont,
     canIncreaseFont,
     setActiveTab,

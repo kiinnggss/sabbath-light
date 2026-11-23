@@ -63,7 +63,7 @@ export function CornerstonePdfReader({
                 onClick={() => setSelectedPdfIdx(idx)}
                 className={`tactile-btn inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold ${
                   active
-                    ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-white'
+                    ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--ink-on-accent)]'
                     : 'border-[var(--border-subtle)] bg-[var(--bg-recessed)] text-[var(--ink-secondary)]'
                 }`}
               >
@@ -124,7 +124,7 @@ export function CornerstonePdfReader({
           </div>
           <button
             type="submit"
-            className="tactile-btn h-10 shrink-0 rounded-xl bg-[var(--accent-primary)] px-3.5 text-xs font-bold text-white shadow-[var(--shadow-tactile)]"
+            className="tactile-btn h-10 shrink-0 rounded-xl bg-[var(--accent-primary)] px-3.5 text-xs font-bold text-[var(--ink-on-accent)] shadow-[var(--shadow-tactile)]"
           >
             Look up
           </button>
@@ -140,7 +140,7 @@ export function CornerstonePdfReader({
               key={ref}
               type="button"
               onClick={() => onOpenScripture(ref)}
-              className="tactile-btn inline-flex h-8 items-center gap-1 rounded-full border border-[var(--accent-primary)]/40 bg-[var(--bg-surface)] px-2.5 text-xs font-bold text-[var(--accent-primary)] hover:bg-[var(--accent-primary)] hover:text-white"
+              className="tactile-btn inline-flex h-8 items-center gap-1 rounded-full border border-[var(--accent-primary)]/40 bg-[var(--bg-surface)] px-2.5 text-xs font-bold text-[var(--accent-primary)] hover:bg-[var(--accent-primary)] hover:text-[var(--ink-on-accent)]"
             >
               <BookBookmark size={12} weight="duotone" />
               <span>{ref}</span>

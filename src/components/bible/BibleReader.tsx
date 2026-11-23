@@ -53,7 +53,7 @@ export function BibleReader({
           <p className="text-xs font-bold uppercase tracking-wider text-[var(--accent-primary)]">
             {book.testament === 'OT' ? 'Old Testament' : 'New Testament'}
           </p>
-          <h2 className="mt-1 text-2xl font-bold tracking-tight text-[var(--ink-primary)] sm:text-3xl">
+          <h2 className="font-display mt-1 text-2xl font-bold tracking-tight text-[var(--ink-primary)] sm:text-3xl">
             {book.name} {chapter}
           </h2>
           <p className="mt-1 text-xs text-[var(--ink-muted)]">

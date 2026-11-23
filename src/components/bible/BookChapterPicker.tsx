@@ -172,7 +172,7 @@ export function BookChapterPicker({
                     }}
                     className={`tactile-btn flex h-11 items-center justify-center rounded-xl border font-[family-name:var(--font-mono)] text-sm font-bold ${
                       isCurrent
-                        ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-white'
+                        ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--ink-on-accent)]'
                         : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--ink-primary)] hover:border-[var(--border-strong)]'
                     }`}
                   >
