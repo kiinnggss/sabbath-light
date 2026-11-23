@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="112" fill="#1A110C"/>
+  <rect x="28" y="28" width="456" height="456" rx="88" stroke="#3B2B21" stroke-width="6"/>
+  <!-- Warm amber sunrise arc inspired by Sing the Story + Yoto glow -->
+  <path d="M132 232C132 163.5 187.5 108 256 108C324.5 108 380 163.5 380 232" stroke="#E6A63F" stroke-width="22" stroke-linecap="round"/>
+  <path d="M174 232C174 186.7 210.7 150 256 150C301.3 150 338 186.7 338 232" stroke="#B64F1B" stroke-width="22" stroke-linecap="round"/>
+  <circle cx="256" cy="212" r="24" fill="#F2AC3E"/>
+  <!-- Open hymnal pages -->
+  <path d="M104 252C148 234 206 238 256 268C306 238 364 234 408 252V376C362 358 306 362 256 392C206 362 150 358 104 376V252Z" fill="#F7F5F0"/>
+  <path d="M256 268V392" stroke="#C9BC9A" stroke-width="10" stroke-linecap="round"/>
+  <path d="M142 290C172 284 202 288 228 300" stroke="#B64F1B" stroke-width="10" stroke-linecap="round"/>
+  <path d="M142 324C172 318 202 322 228 334" stroke="#130603" stroke-opacity="0.35" stroke-width="10" stroke-linecap="round"/>
+  <path d="M370 290C340 284 310 288 284 300" stroke="#130603" stroke-opacity="0.35" stroke-width="10" stroke-linecap="round"/>
+  <path d="M370 324C340 318 310 322 284 334" stroke="#130603" stroke-opacity="0.35" stroke-width="10" stroke-linecap="round"/>
+</svg>

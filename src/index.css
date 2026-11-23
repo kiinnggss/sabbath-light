@@ -1,0 +1,257 @@
+@import "tailwindcss";
+
+:root {
+  --font-ui: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-reading: 'Literata', Georgia, Cambria, 'Times New Roman', serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --reading-scale: 1;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+
+  --bg-canvas: #F7F5F0;
+  --bg-surface: #FFFFFF;
+  --bg-recessed: #EDE8DD;
+  --bg-sand: #C9BC9A;
+  --bg-sand-soft: #E8E0CC;
+  --border-subtle: #DDD4C3;
+  --border-strong: #C9BC9A;
+
+  --ink-primary: #130603;
+  --ink-secondary: #594539;
+  --ink-muted: #725D50;
+
+  --accent-primary: #B64F1B;
+  --accent-primary-hover: #9A4013;
+  --accent-primary-soft: rgba(182, 79, 27, 0.12);
+  --accent-amber: #E6A63F;
+  --accent-amber-soft: rgba(230, 166, 63, 0.18);
+
+  --bezel-bg: #1A110C;
+  --bezel-border: #2F2119;
+  --bezel-dot-off: #35261D;
+  --bezel-dot-on: #F2AC3E;
+
+  --hl-amber: rgba(230, 166, 63, 0.28);
+  --hl-terracotta: rgba(182, 79, 27, 0.20);
+  --hl-sand: rgba(201, 188, 154, 0.42);
+  --hl-olive: rgba(114, 130, 74, 0.22);
+
+  --shadow-tactile: 0 2px 0 0 rgba(19, 6, 3, 0.10);
+  --shadow-sheet: 0 -8px 28px rgba(19, 6, 3, 0.14);
+  --nightlight-glow: none;
+}
+
+[data-theme="dark"] {
+  --bg-canvas: #15100D;
+  --bg-surface: #1F1814;
+  --bg-recessed: #29201A;
+  --bg-sand: #4A3B2E;
+  --bg-sand-soft: #31261E;
+  --border-subtle: #332820;
+  --border-strong: #4D3D30;
+
+  --ink-primary: #F5EFE6;
+  --ink-secondary: #C4B3A2;
+  --ink-muted: #9D8B7B;
+
+  --accent-primary: #D9652B;
+  --accent-primary-hover: #E5753C;
+  --accent-primary-soft: rgba(217, 101, 43, 0.20);
+  --accent-amber: #E6A63F;
+  --accent-amber-soft: rgba(230, 166, 63, 0.18);
+
+  --bezel-bg: #110B08;
+  --bezel-border: #3B2B21;
+  --bezel-dot-off: #2C1F18;
+  --bezel-dot-on: #F5B84E;
+
+  --hl-amber: rgba(230, 166, 63, 0.24);
+  --hl-terracotta: rgba(217, 101, 43, 0.24);
+  --hl-sand: rgba(157, 139, 123, 0.24);
+  --hl-olive: rgba(132, 152, 88, 0.24);
+
+  --shadow-tactile: 0 2px 0 0 rgba(0, 0, 0, 0.35);
+  --shadow-sheet: 0 -10px 32px rgba(0, 0, 0, 0.55);
+  --nightlight-glow: radial-gradient(ellipse 85% 45% at 50% 0%, rgba(230, 166, 63, 0.11), transparent 72%);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-canvas);
+  color: var(--ink-primary);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  min-height: 100dvh;
+  background-image: var(--nightlight-glow);
+  background-repeat: no-repeat;
+}
+
+/* Focus rings */
+:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* Global scaled reading prose */
+.reading-prose {
+  font-family: var(--font-reading);
+  font-size: calc(1.0625rem * var(--reading-scale));
+  line-height: calc(1.62 + (var(--reading-scale) - 1) * 0.14);
+  max-width: 68ch;
+  text-wrap: pretty;
+}
+
+/* Tactile button feel */
+.tactile-btn {
+  transition: transform 150ms var(--ease-out), background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.tactile-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tactile-btn {
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  }
+  .tactile-btn:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* Sheet enter animation */
+@keyframes sheetSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.sheet-enter {
+  animation: sheetSlideUp 220ms var(--ease-out) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-enter {
+    animation: none;
+  }
+}
+
+/* Range inputs (audio scrubber & BPM) */
+input[type="range"].tactile-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--bg-sand);
+  cursor: pointer;
+}
+
+input[type="range"].tactile-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: var(--accent-primary);
+  border: 2px solid var(--bg-surface);
+  box-shadow: 0 1px 3px rgba(19, 6, 3, 0.30);
+}
+
+input[type="range"].tactile-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: var(--accent-primary);
+  border: 2px solid var(--bg-surface);
+  box-shadow: 0 1px 3px rgba(19, 6, 3, 0.30);
+}
+
+/* Sabbath School HTML styling */
+.ss-lesson-html h1,
+.ss-lesson-html h2,
+.ss-lesson-html h3,
+.ss-lesson-html h4 {
+  font-family: var(--font-ui);
+  color: var(--ink-primary);
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: 1.35em;
+  margin-bottom: 0.5em;
+}
+
+.ss-lesson-html h3 {
+  font-size: calc(1.12rem * var(--reading-scale));
+}
+
+.ss-lesson-html p {
+  margin-bottom: 1em;
+}
+
+.ss-lesson-html blockquote {
+  margin: 1.15em 0;
+  padding: 0.9rem 1.05rem;
+  border-radius: 14px;
+  background-color: var(--bg-recessed);
+  border: 1px solid var(--border-subtle);
+  color: var(--ink-primary);
+}
+
+.ss-lesson-html blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.ss-lesson-html ul,
+.ss-lesson-html ol {
+  margin: 0.9em 0 1em 1.25em;
+}
+
+.ss-lesson-html li {
+  margin-bottom: 0.45em;
+}
+
+.ss-lesson-html a.verse,
+.ss-lesson-html button.verse-ref-btn {
+  color: var(--accent-primary);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  display: inline;
+  text-align: left;
+}
+
+.ss-lesson-html a.verse:hover,
+.ss-lesson-html button.verse-ref-btn:hover {
+  color: var(--accent-primary-hover);
+}
+
+/* Hide scrollbars cleanly on horizontal pill rails */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
