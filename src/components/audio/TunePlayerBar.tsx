@@ -34,15 +34,19 @@ export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
 
   useEffect(() => {
     const unsub = midiPlayer.subscribe(setPlayback);
-    void midiPlayer.loadHymn(hymn.number, hymn.defaultBpm || 96);
+    void midiPlayer.loadHymn(
+      hymn.number,
+      hymn.defaultBpm || 96,
+      hymn.tuneName || hymn.title,
+    );
     return () => {
       unsub();
       midiPlayer.stop();
     };
-  }, [hymn.number, hymn.defaultBpm]);
+  }, [hymn.number, hymn.defaultBpm, hymn.tuneName, hymn.title]);
 
   const handlePlayPause = async () => {
-    if (playback.status !== 'ready') return;
+    if (playback.status !== 'ready' && playback.status !== 'preparing') return;
     if (playback.isPlaying) {
       midiPlayer.pause();
     } else {
@@ -83,7 +87,12 @@ export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
     );
   }
 
-  const isLoadingTrack = playback.status === 'loading' || startingAudio;
+  const isLoadingTrack =
+    playback.status === 'loading' ||
+    playback.status === 'preparing' ||
+    startingAudio;
+  const canTapPlay =
+    playback.status === 'ready' || playback.status === 'preparing';
 
   return (
     <section
@@ -94,14 +103,16 @@ export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
         {/* Chunky Yoto-inspired Play/Pause */}
         <button
           type="button"
-          disabled={isLoadingTrack || playback.status !== 'ready'}
+          disabled={!canTapPlay}
           onClick={handlePlayPause}
           aria-label={
-            isLoadingTrack
-              ? 'Loading piano samples'
-              : playback.isPlaying
-                ? 'Pause hymn tune'
-                : 'Play hymn tune'
+            playback.status === 'preparing'
+              ? `Preparing ${playback.voice} audio`
+              : playback.status === 'loading'
+                ? 'Loading hymn track'
+                : playback.isPlaying
+                  ? 'Pause hymn tune'
+                  : 'Play hymn tune'
           }
           className="tactile-btn flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-[var(--shadow-tactile)] hover:bg-[var(--accent-primary-hover)] disabled:opacity-55"
         >
@@ -122,7 +133,11 @@ export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
                 {hymn.tuneName || `Hymn #${hymn.number}`}
               </p>
               <p className="truncate text-[11px] text-[var(--ink-muted)]">
-                {hymn.key || 'Grand Piano'} · {playback.effectiveBpm} BPM ({playback.speed.toFixed(2)}x)
+                {playback.status === 'preparing'
+                  ? `Preparing ${playback.voice} audio...`
+                  : playback.status === 'loading'
+                    ? 'Loading hymn track...'
+                    : `${hymn.key || 'Grand Piano'} · ${playback.effectiveBpm} BPM (${playback.speed.toFixed(2)}x)`}
               </p>
             </div>
 

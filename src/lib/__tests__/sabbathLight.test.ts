@@ -1,6 +1,7 @@
 import { Midi } from '@tonejs/midi';
 import { describe, expect, it } from 'vitest';
 import {
+  encodePcmToWav,
   extractPlayableMidiData,
   formatMidiFilename,
   isValidMidiBuffer,
@@ -222,31 +223,70 @@ describe('midi player helpers', () => {
     expect(isValidMidiBuffer(htmlFallback.buffer)).toBe(false);
   });
 
-  it('deduplicates doubled GM ensemble layers and strips percussion channels', () => {
+  it('deduplicates doubled GM ensemble layers and strips percussion and GM bass tracks', () => {
     const midi = new Midi();
     const ep = midi.addTrack();
     ep.channel = 0;
     ep.addNote({ name: 'C5', time: 0, duration: 0.5, velocity: 0.72 });
     ep.addNote({ name: 'E4', time: 0, duration: 0.5, velocity: 0.7 });
 
+    // Unison hymns (#14, #31) place piano left hand on channel 2
+    const leftHand = midi.addTrack();
+    leftHand.channel = 2;
+    leftHand.instrument.number = 5;
+    leftHand.addNote({ name: 'C3', time: 0, duration: 0.5, velocity: 0.7 });
+
     const strings = midi.addTrack();
-    strings.channel = 2;
+    strings.channel = 3;
+    strings.instrument.number = 48;
     strings.addNote({ name: 'C5', time: 0.005, duration: 0.45, velocity: 0.95 });
     strings.addNote({ name: 'E4', time: 0.004, duration: 0.55, velocity: 0.95 });
+
+    const bass = midi.addTrack();
+    bass.channel = 4;
+    bass.instrument.number = 32; // acoustic bass (GM 32..39)
+    bass.addNote({ midi: 24, time: 0, duration: 0.5, velocity: 0.85 });
 
     const drums = midi.addTrack();
     drums.channel = 9;
     drums.addNote({ midi: 36, time: 0, duration: 0.25, velocity: 0.8 });
 
     const result = extractPlayableMidiData(midi, 96);
-    expect(result.notes).toHaveLength(2);
-    expect(result.notes.map((n) => n.name).sort()).toEqual(['C5', 'E4']);
+    expect(result.notes).toHaveLength(3);
+    expect(result.notes.map((n) => n.name).sort()).toEqual(['C3', 'C5', 'E4']);
 
     const c5 = result.notes.find((n) => n.name === 'C5');
     const e4 = result.notes.find((n) => n.name === 'E4');
-    // Keyboard channel (<= 1) velocity takes precedence and longer duration wins
+    // Keyboard channel velocity takes precedence and longer duration wins
     expect(c5?.velocity).toBeCloseTo(0.72, 2);
     expect(e4?.duration).toBeCloseTo(0.55, 2);
+  });
+
+  it('encodes peak-normalized, soft-limited 16-bit stereo WAV buffers without clipping', () => {
+    const sampleRate = 32000;
+    const len = 1024;
+    const left = new Float32Array(len);
+    const right = new Float32Array(len);
+    for (let i = 0; i < len; i++) {
+      left[i] = Math.sin((i / sampleRate) * 440 * Math.PI * 2) * 3.0;
+      right[i] = Math.sin((i / sampleRate) * 440 * Math.PI * 2) * 0.5;
+    }
+
+    const wav = encodePcmToWav(left, right, sampleRate);
+    expect(wav.byteLength).toBe(44 + len * 4);
+    const view = new DataView(wav);
+    expect(view.getUint32(0, false)).toBe(0x52494646); // RIFF
+    expect(view.getUint32(8, false)).toBe(0x57415645); // WAVE
+    expect(view.getUint16(22, true)).toBe(2); // Stereo
+    expect(view.getUint32(24, true)).toBe(32000);
+
+    let maxAbsNorm = 0;
+    for (let i = 44; i < wav.byteLength; i += 2) {
+      const sampleNorm = Math.abs(view.getInt16(i, true)) / 32767;
+      if (sampleNorm > maxAbsNorm) maxAbsNorm = sampleNorm;
+    }
+    expect(maxAbsNorm).toBeGreaterThan(0.8);
+    expect(maxAbsNorm).toBeLessThanOrEqual(0.985);
   });
 
   it('resolves baseBpm from the active tempo at first note and trims long silent lead-ins', () => {
