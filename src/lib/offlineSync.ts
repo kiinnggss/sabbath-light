@@ -11,6 +11,38 @@ import {
 } from './sabbathSchoolApi';
 
 export const SS_SYNC_META_KEY = 'sabbath-school-quarter';
+export const HYMN_MIDI_CACHE_NAME = 'hymn-midi-cache';
+export const TOTAL_HYMN_MIDIS = 695;
+
+const MIDI_PATH_RE = /\/midi\/\d{3}\.mid$/i;
+
+function getBaseUrl(): string {
+  const base = import.meta.env.BASE_URL || '/';
+  return base.endsWith('/') ? base : `${base}/`;
+}
+
+export function buildMidiUrl(hymnNumber: number): string {
+  const filename = `${String(Math.max(1, Math.floor(hymnNumber))).padStart(3, '0')}.mid`;
+  const path = `${getBaseUrl()}midi/${filename}`;
+  return typeof window !== 'undefined' ? new URL(path, window.location.origin).href : path;
+}
+
+function hasMthdHeaderBytes(buffer: ArrayBuffer): boolean {
+  if (!buffer || buffer.byteLength < 14) return false;
+  const bytes = new Uint8Array(buffer, 0, 4);
+  return bytes[0] === 0x4d && bytes[1] === 0x54 && bytes[2] === 0x68 && bytes[3] === 0x64;
+}
+
+export async function getCachedMidiCount(): Promise<number> {
+  if (typeof caches === 'undefined') return 0;
+  try {
+    const cache = await caches.open(HYMN_MIDI_CACHE_NAME);
+    const keys = await cache.keys();
+    return keys.filter((req) => MIDI_PATH_RE.test(req.url)).length;
+  } catch {
+    return 0;
+  }
+}
 
 export interface PersistentStorageReport {
   persisted: boolean;
@@ -153,4 +185,66 @@ export async function syncCurrentSabbathSchoolQuarter(
   );
 
   return meta;
+}
+
+/**
+ * Progressively warms Cache Storage with all 695 hymnal MIDI files so full offline
+ * playback works in Airplane Mode without bloating the Service Worker install phase.
+ */
+export async function syncAllHymnMidisOffline(
+  onProgress?: (cached: number, total: number) => void,
+): Promise<number> {
+  if (typeof caches === 'undefined' || typeof window === 'undefined') return 0;
+
+  const cache = await caches.open(HYMN_MIDI_CACHE_NAME);
+  const existingKeys = await cache.keys();
+  const existingUrls = new Set(existingKeys.map((req) => req.url));
+
+  const missing: number[] = [];
+  for (let num = 1; num <= TOTAL_HYMN_MIDIS; num += 1) {
+    if (!existingUrls.has(buildMidiUrl(num))) {
+      missing.push(num);
+    }
+  }
+
+  let cachedCount = existingKeys.filter((req) => MIDI_PATH_RE.test(req.url)).length;
+  onProgress?.(Math.min(TOTAL_HYMN_MIDIS, cachedCount), TOTAL_HYMN_MIDIS);
+
+  if (missing.length === 0) return Math.min(TOTAL_HYMN_MIDIS, cachedCount);
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return Math.min(TOTAL_HYMN_MIDIS, cachedCount);
+  }
+
+  let completedInBatch = 0;
+
+  await mapWithConcurrency(missing, 4, async (num) => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+    const url = buildMidiUrl(num);
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const buf = await res.arrayBuffer();
+      if (!hasMthdHeaderBytes(buf)) return;
+
+      await cache.put(
+        url,
+        new Response(buf, {
+          status: 200,
+          headers: { 'Content-Type': 'audio/midi' },
+        }),
+      );
+      cachedCount += 1;
+      completedInBatch += 1;
+      if (completedInBatch % 15 === 0) {
+        onProgress?.(Math.min(TOTAL_HYMN_MIDIS, cachedCount), TOTAL_HYMN_MIDIS);
+      }
+    } catch {
+      // Skip transient offline/network error; next online session resumes missing tracks
+    }
+  });
+
+  const finalKeys = await cache.keys();
+  const finalCount = finalKeys.filter((req) => MIDI_PATH_RE.test(req.url)).length;
+  onProgress?.(Math.min(TOTAL_HYMN_MIDIS, finalCount), TOTAL_HYMN_MIDIS);
+  return Math.min(TOTAL_HYMN_MIDIS, finalCount);
 }

@@ -42,6 +42,8 @@ interface TopBarProps {
   ssSyncMeta: SabbathSchoolSyncMeta | null;
   ssSyncing: boolean;
   ssSyncDetail: string;
+  midiCachedCount: number;
+  midiSyncing: boolean;
   anyDownloading: boolean;
   isReadyForOffline: boolean;
   syncError: string | null;
@@ -78,6 +80,8 @@ export function TopBar({
   ssSyncMeta,
   ssSyncing,
   ssSyncDetail,
+  midiCachedCount,
+  midiSyncing,
   anyDownloading,
   isReadyForOffline,
   syncError,
@@ -274,6 +278,8 @@ export function TopBar({
         ssSyncMeta={ssSyncMeta}
         ssSyncing={ssSyncing}
         ssSyncDetail={ssSyncDetail}
+        midiCachedCount={midiCachedCount}
+        midiSyncing={midiSyncing}
         isReadyForOffline={isReadyForOffline}
         syncError={syncError}
         onSyncNow={onSyncNow}

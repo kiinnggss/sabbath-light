@@ -19,11 +19,17 @@ export interface MidiPlaybackState {
   errorMessage?: string;
 }
 
-interface ParsedMidiNote {
+export interface ParsedMidiNote {
   time: number;
   duration: number;
   name: string;
   velocity: number;
+}
+
+export interface PlayableMidiData {
+  notes: ParsedMidiNote[];
+  durationSec: number;
+  baseBpm: number;
 }
 
 type StateListener = (state: MidiPlaybackState) => void;
@@ -75,6 +81,116 @@ export function isValidMidiBuffer(buffer: ArrayBuffer): boolean {
   if (!buffer || buffer.byteLength < 14) return false;
   const bytes = new Uint8Array(buffer, 0, 4);
   return bytes[0] === 0x4d && bytes[1] === 0x54 && bytes[2] === 0x68 && bytes[3] === 0x64;
+}
+
+function clampVelocity(rawVelocity: number | undefined): number {
+  return Math.min(0.85, Math.max(0.25, rawVelocity || 0.68));
+}
+
+function resolveBaseBpm(parsed: Midi, firstNoteTime: number, fallbackBpm: number): number {
+  const validTempos = (parsed.header?.tempos || []).filter(
+    (t) => typeof t.bpm === 'number' && t.bpm >= 35 && t.bpm <= 210,
+  );
+
+  let activeTempo: (typeof validTempos)[number] | undefined;
+  for (const tempo of validTempos) {
+    const tempoTime = typeof tempo.time === 'number' ? tempo.time : 0;
+    if (tempoTime <= firstNoteTime + 0.05) {
+      activeTempo = tempo;
+    }
+  }
+
+  const chosen = activeTempo?.bpm ?? validTempos[0]?.bpm ?? fallbackBpm ?? 96;
+  return Math.round(chosen);
+}
+
+/**
+ * Extracts clean playable notes from multi-track GM hymn MIDIs:
+ * strips percussion channels, deduplicates doubled SATB ensemble layers,
+ * ignores brief lead-in tempo spikes, and trims excessive leading silence.
+ */
+export function extractPlayableMidiData(parsed: Midi, fallbackBpm = 96): PlayableMidiData {
+  interface DedupEntry {
+    note: ParsedMidiNote;
+    isKeyboard: boolean;
+  }
+
+  const deduped = new Map<string, DedupEntry>();
+
+  for (const track of parsed.tracks) {
+    if (track.channel === 9 || Boolean(track.instrument?.percussion)) {
+      continue;
+    }
+
+    const isKeyboard = track.channel <= 1;
+
+    for (const note of track.notes) {
+      if (!note.name) continue;
+
+      const time = Math.max(0, note.time);
+      const duration = Math.max(0.08, note.duration);
+      const velocity = clampVelocity(note.velocity);
+      const bucket = Math.round(time * 50);
+      const pitchKey = note.midi !== undefined ? String(note.midi) : note.name;
+      const key = `${bucket}_${pitchKey}`;
+      const existing = deduped.get(key);
+
+      if (!existing) {
+        deduped.set(key, {
+          note: { time, duration, name: note.name, velocity },
+          isKeyboard,
+        });
+      } else {
+        if (duration > existing.note.duration) {
+          existing.note.duration = duration;
+        }
+        if (isKeyboard && !existing.isKeyboard) {
+          existing.note.velocity = velocity;
+          existing.isKeyboard = true;
+        } else if (isKeyboard === existing.isKeyboard && velocity > existing.note.velocity) {
+          existing.note.velocity = velocity;
+        }
+        if (time < existing.note.time) {
+          existing.note.time = time;
+        }
+      }
+    }
+  }
+
+  const notes = Array.from(deduped.values(), (entry) => entry.note).sort(
+    (a, b) => a.time - b.time,
+  );
+
+  if (notes.length === 0) {
+    return {
+      notes: [],
+      durationSec: 1,
+      baseBpm: Math.round(fallbackBpm || 96),
+    };
+  }
+
+  const firstNoteTime = notes[0].time;
+  const baseBpm = resolveBaseBpm(parsed, firstNoteTime, fallbackBpm);
+  const shifted = firstNoteTime > 1.2;
+
+  if (shifted) {
+    const offset = firstNoteTime - 0.15;
+    for (const note of notes) {
+      note.time = Math.max(0, note.time - offset);
+    }
+  }
+
+  let maxEnd = 0;
+  for (const note of notes) {
+    const end = note.time + note.duration;
+    if (end > maxEnd) maxEnd = end;
+  }
+
+  const durationSec = shifted
+    ? Math.max(maxEnd, 1)
+    : Math.max(parsed.duration || 0, maxEnd, 1);
+
+  return { notes, durationSec, baseBpm };
 }
 
 class RealMidiPlayerEngine {
@@ -282,7 +398,11 @@ class RealMidiPlayerEngine {
     this.errorMessage = undefined;
     this.emit();
 
-    const midiUrl = `${this.getBaseUrl()}midi/${formatMidiFilename(hymnNumber)}`;
+    const midiPath = `${this.getBaseUrl()}midi/${formatMidiFilename(hymnNumber)}`;
+    const midiUrl =
+      typeof window !== 'undefined'
+        ? new URL(midiPath, window.location.origin).href
+        : midiPath;
 
     try {
       const res = await fetch(midiUrl);
@@ -304,36 +424,17 @@ class RealMidiPlayerEngine {
       }
 
       const parsed = new Midi(buf);
-      const collected: ParsedMidiNote[] = [];
-      let maxEnd = 0;
+      const { notes, durationSec, baseBpm } = extractPlayableMidiData(parsed, fallbackBpm);
 
-      for (const track of parsed.tracks) {
-        for (const note of track.notes) {
-          if (!note.name) continue;
-          const dur = Math.max(0.08, note.duration);
-          collected.push({
-            time: Math.max(0, note.time),
-            duration: dur,
-            name: note.name,
-            velocity: Math.min(1, Math.max(0.2, note.velocity || 0.72)),
-          });
-          if (note.time + dur > maxEnd) {
-            maxEnd = note.time + dur;
-          }
-        }
-      }
-
-      if (collected.length === 0) {
+      if (notes.length === 0) {
         this.status = 'unavailable';
         this.emit();
         return;
       }
 
-      collected.sort((a, b) => a.time - b.time);
-      this.notes = collected;
-      this.midiDurationSec = Math.max(parsed.duration || 0, maxEnd, 1);
-      const headerTempo = parsed.header.tempos[0]?.bpm;
-      this.baseBpm = Math.round(headerTempo || fallbackBpm || 96);
+      this.notes = notes;
+      this.midiDurationSec = durationSec;
+      this.baseBpm = baseBpm;
       this.status = 'ready';
       this.emit();
     } catch (err) {

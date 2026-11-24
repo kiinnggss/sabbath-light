@@ -1,0 +1,6 @@
+Seventh-day Adventist Hymnal (1985) MIDI Tracks (001.mid through 695.mid)
+
+Source repository: https://github.com/TinasheMzondiwa/sda-hymnal-android
+Directory: features/sing/src/main/assets/midis
+License: Apache-2.0
+Updated: 2026-11-24T08:59:49.890Z

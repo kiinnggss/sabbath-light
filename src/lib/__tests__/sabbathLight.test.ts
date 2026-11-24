@@ -1,5 +1,10 @@
+import { Midi } from '@tonejs/midi';
 import { describe, expect, it } from 'vitest';
-import { formatMidiFilename, isValidMidiBuffer } from '../../components/audio/midiPlayer';
+import {
+  extractPlayableMidiData,
+  formatMidiFilename,
+  isValidMidiBuffer,
+} from '../../components/audio/midiPlayer';
 import { FONT_PRESETS, resolveFontPresetId } from '../../data/fonts';
 import type { HymnalEntry } from '../../data/hymnalTypes';
 import { getContrastTextColor, normalizeHex, resolveThemeId, THEMES } from '../../data/themes';
@@ -215,6 +220,58 @@ describe('midi player helpers', () => {
 
     const htmlFallback = new TextEncoder().encode('<!doctype html><html></html>');
     expect(isValidMidiBuffer(htmlFallback.buffer)).toBe(false);
+  });
+
+  it('deduplicates doubled GM ensemble layers and strips percussion channels', () => {
+    const midi = new Midi();
+    const ep = midi.addTrack();
+    ep.channel = 0;
+    ep.addNote({ name: 'C5', time: 0, duration: 0.5, velocity: 0.72 });
+    ep.addNote({ name: 'E4', time: 0, duration: 0.5, velocity: 0.7 });
+
+    const strings = midi.addTrack();
+    strings.channel = 2;
+    strings.addNote({ name: 'C5', time: 0.005, duration: 0.45, velocity: 0.95 });
+    strings.addNote({ name: 'E4', time: 0.004, duration: 0.55, velocity: 0.95 });
+
+    const drums = midi.addTrack();
+    drums.channel = 9;
+    drums.addNote({ midi: 36, time: 0, duration: 0.25, velocity: 0.8 });
+
+    const result = extractPlayableMidiData(midi, 96);
+    expect(result.notes).toHaveLength(2);
+    expect(result.notes.map((n) => n.name).sort()).toEqual(['C5', 'E4']);
+
+    const c5 = result.notes.find((n) => n.name === 'C5');
+    const e4 = result.notes.find((n) => n.name === 'E4');
+    // Keyboard channel (<= 1) velocity takes precedence and longer duration wins
+    expect(c5?.velocity).toBeCloseTo(0.72, 2);
+    expect(e4?.duration).toBeCloseTo(0.55, 2);
+  });
+
+  it('resolves baseBpm from the active tempo at first note and trims long silent lead-ins', () => {
+    const syntheticMidi = {
+      duration: 6.5,
+      header: {
+        tempos: [
+          { bpm: 250, ticks: 0, time: 0 },
+          { bpm: 94.0001, ticks: 768, time: 0.48 },
+        ],
+      },
+      tracks: [
+        {
+          channel: 0,
+          instrument: { percussion: false },
+          notes: [{ name: 'D5', midi: 74, time: 2.4, duration: 1.0, velocity: 0.75 }],
+        },
+      ],
+    } as unknown as Midi;
+
+    const result = extractPlayableMidiData(syntheticMidi, 96);
+    expect(result.baseBpm).toBe(94);
+    expect(result.notes).toHaveLength(1);
+    expect(result.notes[0].time).toBeCloseTo(0.15, 3);
+    expect(result.durationSec).toBeCloseTo(1.15, 3);
   });
 });
 

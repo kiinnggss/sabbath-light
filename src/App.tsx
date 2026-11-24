@@ -128,6 +128,8 @@ export function App() {
         ssSyncMeta={offlineSync.ssSyncMeta}
         ssSyncing={offlineSync.ssSyncing}
         ssSyncDetail={offlineSync.ssSyncDetail}
+        midiCachedCount={offlineSync.midiCachedCount}
+        midiSyncing={offlineSync.midiSyncing}
         anyDownloading={offlineSync.anyDownloading}
         isReadyForOffline={offlineSync.isReadyForOffline}
         syncError={offlineSync.syncError}

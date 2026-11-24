@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "build:hymnal": "node scripts/build-hymnal-data.mjs"
+    "build:hymnal": "node scripts/build-hymnal-data.mjs",
+    "fetch:midis": "node scripts/fetch-sdah-midis.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

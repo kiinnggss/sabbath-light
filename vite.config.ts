@@ -55,9 +55,24 @@ export default defineConfig(({ mode }) => {
             new RegExp(`^${base}midi/`),
             new RegExp(`^${base}samples/`),
           ],
-          globPatterns: ['**/*.{js,css,html,svg,png,woff2,json,mjs,mp3,mid}'],
+          globPatterns: ['**/*.{js,css,html,svg,png,woff2,json,mjs,mp3}'],
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           runtimeCaching: [
+            {
+              urlPattern: new RegExp(
+                `^.*${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}midi/\\d{3}\\.mid$`,
+                'i',
+              ),
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'hymn-midi-cache',
+                expiration: {
+                  maxEntries: 750,
+                  maxAgeSeconds: 60 * 60 * 24 * 365,
+                },
+                cacheableResponse: { statuses: [0, 200] },
+              },
+            },
             {
               urlPattern: /^https:\/\/sabbath-school\.adventech\.io\/api\/.*/i,
               handler: 'StaleWhileRevalidate',

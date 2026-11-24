@@ -9,9 +9,12 @@ import {
   type SabbathSchoolSyncMeta,
 } from '../lib/offlineDb';
 import {
+  getCachedMidiCount,
   requestPersistentStorage,
   SS_SYNC_META_KEY,
+  syncAllHymnMidisOffline,
   syncCurrentSabbathSchoolQuarter,
+  TOTAL_HYMN_MIDIS,
 } from '../lib/offlineSync';
 import { getQuarterIdPrefixForDate } from '../lib/sabbathSchoolApi';
 
@@ -34,24 +37,29 @@ export function useOfflineSync(defaultBibleVersion: BibleVersionId) {
   const [ssSyncMeta, setSsSyncMeta] = useState<SabbathSchoolSyncMeta | null>(null);
   const [ssSyncing, setSsSyncing] = useState(false);
   const [ssSyncDetail, setSsSyncDetail] = useState('');
+  const [midiCachedCount, setMidiCachedCount] = useState(0);
+  const [midiSyncing, setMidiSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
   const bibleInFlightRef = useRef(new Set<BibleVersionId>());
   const ssInFlightRef = useRef(false);
+  const midiInFlightRef = useRef(false);
   const bootCheckedRef = useRef(false);
 
   const refreshStorageStats = useCallback(async () => {
-    const [report, versions, ssMeta] = await Promise.all([
+    const [report, versions, ssMeta, midiCount] = await Promise.all([
       requestPersistentStorage(),
       getOfflineBibleVersions().catch(() => []),
       getSyncMeta<SabbathSchoolSyncMeta>(SS_SYNC_META_KEY).catch(() => null),
+      getCachedMidiCount().catch(() => 0),
     ]);
     setStoragePersisted(report.persisted);
     setUsageBytes(report.usageBytes);
     setQuotaBytes(report.quotaBytes);
     setDownloadedVersions(versions);
     setSsSyncMeta(ssMeta);
-    return { report, versions, ssMeta };
+    setMidiCachedCount(midiCount);
+    return { report, versions, ssMeta, midiCount };
   }, []);
 
   const downloadBibleVersion = useCallback(
@@ -117,9 +125,28 @@ export function useOfflineSync(defaultBibleVersion: BibleVersionId) {
     [refreshStorageStats],
   );
 
+  const syncMidisNow = useCallback(async () => {
+    if (midiInFlightRef.current) return;
+    midiInFlightRef.current = true;
+    setMidiSyncing(true);
+
+    try {
+      const count = await syncAllHymnMidisOffline((cached) => {
+        setMidiCachedCount(cached);
+      });
+      setMidiCachedCount(count);
+      await refreshStorageStats();
+    } catch {
+      // Best-effort silent background cache; next online launch resumes any remaining MIDIs
+    } finally {
+      midiInFlightRef.current = false;
+      setMidiSyncing(false);
+    }
+  }, [refreshStorageStats]);
+
   const runAutoSyncCheck = useCallback(
     async (forceQuarterCheck = false) => {
-      const { versions, ssMeta } = await refreshStorageStats();
+      const { versions, ssMeta, midiCount } = await refreshStorageStats();
       if (typeof navigator !== 'undefined' && !navigator.onLine) return;
 
       const currentPrefix = getQuarterIdPrefixForDate(new Date());
@@ -136,8 +163,18 @@ export function useOfflineSync(defaultBibleVersion: BibleVersionId) {
       if (versions.length === 0) {
         void downloadBibleVersion(defaultBibleVersion);
       }
+
+      if (midiCount < TOTAL_HYMN_MIDIS) {
+        void syncMidisNow();
+      }
     },
-    [defaultBibleVersion, downloadBibleVersion, refreshStorageStats, syncQuarterNow],
+    [
+      defaultBibleVersion,
+      downloadBibleVersion,
+      refreshStorageStats,
+      syncMidisNow,
+      syncQuarterNow,
+    ],
   );
 
   useEffect(() => {
@@ -190,6 +227,8 @@ export function useOfflineSync(defaultBibleVersion: BibleVersionId) {
     ssSyncMeta,
     ssSyncing,
     ssSyncDetail,
+    midiCachedCount,
+    midiSyncing,
     anyDownloading,
     isReadyForOffline,
     syncError,

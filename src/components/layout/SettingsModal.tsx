@@ -15,6 +15,7 @@ import type { BibleVersionId } from '../../hooks/usePreferences';
 import type { ActiveVersionDownload } from '../../hooks/useOfflineSync';
 import { BIBLE_VERSIONS } from '../../lib/bibleApi';
 import type { OfflineBibleVersionMeta, SabbathSchoolSyncMeta } from '../../lib/offlineDb';
+import { TOTAL_HYMN_MIDIS } from '../../lib/offlineSync';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -28,6 +29,8 @@ interface SettingsModalProps {
   ssSyncMeta: SabbathSchoolSyncMeta | null;
   ssSyncing: boolean;
   ssSyncDetail: string;
+  midiCachedCount: number;
+  midiSyncing: boolean;
   isReadyForOffline: boolean;
   syncError: string | null;
   onSyncNow: () => Promise<void> | void;
@@ -57,6 +60,8 @@ export function SettingsModal({
   ssSyncMeta,
   ssSyncing,
   ssSyncDetail,
+  midiCachedCount,
+  midiSyncing,
   isReadyForOffline,
   syncError,
   onSyncNow,
@@ -218,7 +223,13 @@ export function SettingsModal({
                 <p className="mt-1 text-xs font-bold text-[var(--ink-primary)]">
                   1-920 + Piano/Organ
                 </p>
-                <p className="mt-0.5 text-[11px] text-[var(--ink-muted)]">Precached in Service Worker</p>
+                <p className="mt-0.5 text-[11px] text-[var(--ink-muted)]">
+                  {midiCachedCount >= TOTAL_HYMN_MIDIS
+                    ? `${TOTAL_HYMN_MIDIS}/${TOTAL_HYMN_MIDIS} MIDI tracks offline`
+                    : midiSyncing
+                      ? `Caching MIDI tracks (${midiCachedCount}/${TOTAL_HYMN_MIDIS})...`
+                      : `${midiCachedCount}/${TOTAL_HYMN_MIDIS} MIDI tracks cached`}
+                </p>
               </div>
 
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3">
