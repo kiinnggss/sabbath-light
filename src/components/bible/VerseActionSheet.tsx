@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { BookmarkSimple, Check, Columns, Copy, Eraser, X } from '@phosphor-icons/react';
+import { BookmarkSimple, Check, Columns, Copy, Eraser, NotePencil, X } from '@phosphor-icons/react';
 import type { BibleBookMeta } from '../../data/bibleBooks';
 import type { BibleVersionId, HighlightColor } from '../../hooks/usePreferences';
 import { BIBLE_VERSIONS, fetchBibleChapter, type BibleVerse } from '../../lib/bibleApi';
+import type { StudyNote } from '../../lib/offlineDb';
 
 interface VerseActionSheetProps {
   verse: BibleVerse | null;
@@ -13,8 +14,10 @@ interface VerseActionSheetProps {
   onCompareVersionChange: (v: BibleVersionId) => void;
   currentHighlight?: HighlightColor;
   isBookmarked: boolean;
+  existingNote?: StudyNote;
   onToggleBookmark: () => void;
   onSetHighlight: (color: HighlightColor | null) => void;
+  onOpenNoteEditor: () => void;
   onClose: () => void;
 }
 
@@ -34,8 +37,10 @@ export function VerseActionSheet({
   onCompareVersionChange,
   currentHighlight,
   isBookmarked,
+  existingNote,
   onToggleBookmark,
   onSetHighlight,
+  onOpenNoteEditor,
   onClose,
 }: VerseActionSheetProps) {
   const [compareText, setCompareText] = useState<string>('');
@@ -145,7 +150,20 @@ export function VerseActionSheet({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onOpenNoteEditor}
+              className={`tactile-btn inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold ${
+                existingNote
+                  ? 'border-[var(--accent-amber)] bg-[var(--accent-amber-soft)] text-[var(--ink-primary)]'
+                  : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--ink-primary)]'
+              }`}
+            >
+              <NotePencil size={15} weight="duotone" className="text-[var(--accent-primary)]" />
+              <span>{existingNote ? 'Edit Note' : 'Add Note'}</span>
+            </button>
+
             <button
               type="button"
               onClick={onToggleBookmark}

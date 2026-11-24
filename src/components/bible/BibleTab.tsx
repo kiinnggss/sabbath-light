@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   BookmarkSimple,
   CaretDown,
+  CheckCircle,
   Columns,
   MagnifyingGlass,
   WarningCircle,
 } from '@phosphor-icons/react';
 import { BIBLE_BOOK_BY_ID, BIBLE_BOOKS } from '../../data/bibleBooks';
+import type { ActiveVersionDownload } from '../../hooks/useOfflineSync';
 import type {
   BibleBookmark,
   BibleLocation,
@@ -14,14 +16,17 @@ import type {
   HighlightColor,
 } from '../../hooks/usePreferences';
 import {
-  BIBLE_VERSIONS,
   fetchBibleChapter,
   fetchCompareChapters,
   type BibleVerse,
 } from '../../lib/bibleApi';
+import { makeBibleNoteRef } from '../../lib/noteReferences';
+import type { OfflineBibleVersionMeta, StudyNote } from '../../lib/offlineDb';
+import type { NoteEditorRequest } from '../notes/NoteEditorSheet';
 import { BibleBookmarksModal } from './BibleBookmarksModal';
 import { BibleReader } from './BibleReader';
 import { BibleSearchModal } from './BibleSearchModal';
+import { BibleVersionModal } from './BibleVersionModal';
 import { BookChapterPicker } from './BookChapterPicker';
 import { CompareSplitView } from './CompareSplitView';
 import { VerseActionSheet } from './VerseActionSheet';
@@ -37,6 +42,13 @@ interface BibleTabProps {
   highlights: Record<string, HighlightColor>;
   onToggleBookmark: (bm: Omit<BibleBookmark, 'createdAt'>) => void;
   onSetHighlight: (key: string, color: HighlightColor | null) => void;
+  notesByRefId: Map<string, StudyNote>;
+  onOpenNoteEditor: (req: NoteEditorRequest) => void;
+  downloadedVersions: OfflineBibleVersionMeta[];
+  activeDownloads: Partial<Record<BibleVersionId, ActiveVersionDownload>>;
+  isOnline: boolean;
+  onDownloadBibleVersion: (v: BibleVersionId) => void;
+  onRemoveBibleVersion: (v: BibleVersionId) => void;
 }
 
 export function BibleTab({
@@ -50,6 +62,13 @@ export function BibleTab({
   highlights,
   onToggleBookmark,
   onSetHighlight,
+  notesByRefId,
+  onOpenNoteEditor,
+  downloadedVersions,
+  activeDownloads,
+  isOnline,
+  onDownloadBibleVersion,
+  onRemoveBibleVersion,
 }: BibleTabProps) {
   const [compareMode, setCompareMode] = useState(false);
   const [verses, setVerses] = useState<BibleVerse[]>([]);
@@ -58,12 +77,22 @@ export function BibleTab({
   const [error, setError] = useState<string | null>(null);
 
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [bookmarksOpen, setBookmarksOpen] = useState(false);
-  const [selectedVerse, setSelectedVerse] = useState<BibleVerse | null>(null);
+  const [selectedActionVerse, setSelectedActionVerse] = useState<BibleVerse | null>(null);
+  const [compareSheetVerse, setCompareSheetVerse] = useState<BibleVerse | null>(null);
 
   const book = BIBLE_BOOK_BY_ID.get(location.bookId) || BIBLE_BOOKS[0];
   const bookmarkedIds = useMemo(() => new Set(bookmarks.map((b) => b.id)), [bookmarks]);
+  const isVersionSavedOffline = useMemo(
+    () => downloadedVersions.some((v) => v.version === version),
+    [downloadedVersions, version],
+  );
+
+  useEffect(() => {
+    setSelectedActionVerse(null);
+  }, [book.id, location.chapter, version]);
 
   useEffect(() => {
     let cancelled = false;
@@ -122,8 +151,22 @@ export function BibleTab({
     }
   };
 
-  const selectedVerseKey = selectedVerse
-    ? `${book.id}:${location.chapter}:${selectedVerse.verse}`
+  const openNoteForVerse = (verse: BibleVerse) => {
+    const referenceId = makeBibleNoteRef(book.id, location.chapter, verse.verse);
+    onOpenNoteEditor({
+      sourceType: 'bible',
+      referenceId,
+      referenceLabel: `${book.name} ${location.chapter}:${verse.verse} · ${version}`,
+      quoteSnippet: verse.text,
+      existingNote: notesByRefId.get(referenceId),
+    });
+  };
+
+  const sheetVerseKey = compareSheetVerse
+    ? `${book.id}:${location.chapter}:${compareSheetVerse.verse}`
+    : '';
+  const sheetNoteRef = compareSheetVerse
+    ? makeBibleNoteRef(book.id, location.chapter, compareSheetVerse.verse)
     : '';
 
   return (
@@ -144,21 +187,18 @@ export function BibleTab({
               <CaretDown size={14} weight="bold" className="text-[var(--ink-muted)]" />
             </button>
 
-            <label htmlFor="bible-version-select" className="sr-only">
-              Select Bible translation
-            </label>
-            <select
-              id="bible-version-select"
-              value={version}
-              onChange={(e) => onVersionChange(e.target.value as BibleVersionId)}
-              className="h-10 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2.5 text-xs font-bold text-[var(--accent-primary)] shadow-[var(--shadow-tactile)]"
+            <button
+              type="button"
+              onClick={() => setVersionsOpen(true)}
+              aria-label={`Select Bible translation, active ${version}`}
+              className="tactile-btn inline-flex h-10 items-center gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 text-xs font-bold text-[var(--accent-primary)] shadow-[var(--shadow-tactile)] hover:border-[var(--border-strong)]"
             >
-              {BIBLE_VERSIONS.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.id}
-                </option>
-              ))}
-            </select>
+              <span>{version}</span>
+              {isVersionSavedOffline && (
+                <CheckCircle size={13} weight="fill" aria-label="Saved offline" />
+              )}
+              <CaretDown size={12} weight="bold" className="text-[var(--ink-muted)]" />
+            </button>
           </div>
 
           {/* Compare Split View, Search, Bookmarks */}
@@ -232,7 +272,7 @@ export function BibleTab({
           leftVerses={verses}
           rightVerses={compareVerses}
           highlights={highlights}
-          onSelectVerse={(v) => setSelectedVerse(v)}
+          onSelectVerse={(v) => setCompareSheetVerse(v)}
           onPrevChapter={goPrevChapter}
           onNextChapter={goNextChapter}
           canPrev={canPrev}
@@ -242,11 +282,17 @@ export function BibleTab({
         <BibleReader
           book={book}
           chapter={location.chapter}
+          version={version}
           verses={verses}
           highlightVerseNum={location.verse}
+          selectedVerse={selectedActionVerse}
           highlights={highlights}
           bookmarkedIds={bookmarkedIds}
-          onSelectVerse={(v) => setSelectedVerse(v)}
+          notesByRefId={notesByRefId}
+          onSelectVerse={(v) => setSelectedActionVerse(v)}
+          onSetHighlight={onSetHighlight}
+          onOpenNoteForVerse={openNoteForVerse}
+          onOpenCompareSheet={(v) => setCompareSheetVerse(v)}
           onPrevChapter={goPrevChapter}
           onNextChapter={goNextChapter}
           canPrev={canPrev}
@@ -259,6 +305,18 @@ export function BibleTab({
         onClose={() => setPickerOpen(false)}
         currentLocation={location}
         onSelectLocation={onLocationChange}
+      />
+
+      <BibleVersionModal
+        open={versionsOpen}
+        onClose={() => setVersionsOpen(false)}
+        selectedVersion={version}
+        onSelectVersion={onVersionChange}
+        downloadedVersions={downloadedVersions}
+        activeDownloads={activeDownloads}
+        isOnline={isOnline}
+        onDownloadVersion={onDownloadBibleVersion}
+        onRemoveVersion={onRemoveBibleVersion}
       />
 
       <BibleSearchModal
@@ -279,31 +337,38 @@ export function BibleTab({
       />
 
       <VerseActionSheet
-        verse={selectedVerse}
+        verse={compareSheetVerse}
         book={book}
         chapter={location.chapter}
         primaryVersion={version}
         compareVersion={compareVersion}
         onCompareVersionChange={onCompareVersionChange}
-        currentHighlight={selectedVerseKey ? highlights[selectedVerseKey] : undefined}
-        isBookmarked={selectedVerseKey ? bookmarkedIds.has(selectedVerseKey) : false}
+        currentHighlight={sheetVerseKey ? highlights[sheetVerseKey] : undefined}
+        isBookmarked={sheetVerseKey ? bookmarkedIds.has(sheetVerseKey) : false}
+        existingNote={sheetNoteRef ? notesByRefId.get(sheetNoteRef) : undefined}
         onToggleBookmark={() => {
-          if (!selectedVerse) return;
+          if (!compareSheetVerse) return;
           onToggleBookmark({
-            id: selectedVerseKey,
+            id: sheetVerseKey,
             bookId: book.id,
             chapter: location.chapter,
-            verse: selectedVerse.verse,
+            verse: compareSheetVerse.verse,
             version,
-            reference: `${book.name} ${location.chapter}:${selectedVerse.verse}`,
-            snippet: selectedVerse.text,
+            reference: `${book.name} ${location.chapter}:${compareSheetVerse.verse}`,
+            snippet: compareSheetVerse.text,
           });
         }}
         onSetHighlight={(color) => {
-          if (!selectedVerseKey) return;
-          onSetHighlight(selectedVerseKey, color);
+          if (!sheetVerseKey) return;
+          onSetHighlight(sheetVerseKey, color);
         }}
-        onClose={() => setSelectedVerse(null)}
+        onOpenNoteEditor={() => {
+          if (!compareSheetVerse) return;
+          const v = compareSheetVerse;
+          setCompareSheetVerse(null);
+          openNoteForVerse(v);
+        }}
+        onClose={() => setCompareSheetVerse(null)}
       />
     </div>
   );

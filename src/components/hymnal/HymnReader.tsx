@@ -5,9 +5,11 @@ import {
   CaretLeft,
   CaretRight,
   MusicNotes,
+  NotePencil,
   Star,
 } from '@phosphor-icons/react';
 import type { HymnEntry } from '../../data/hymnalTypes';
+import type { StudyNote } from '../../lib/offlineDb';
 import { TunePlayerBar } from '../audio/TunePlayerBar';
 import { DotMatrixBadge } from './DotMatrixBadge';
 import { HymnStoryView } from './HymnStoryView';
@@ -15,7 +17,9 @@ import { HymnStoryView } from './HymnStoryView';
 interface HymnReaderProps {
   hymn: HymnEntry;
   isFavorite: boolean;
+  note?: StudyNote;
   onToggleFavorite: (number: number) => void;
+  onOpenNoteEditor: () => void;
   onBack: () => void;
   onNavigateNumber: (number: number) => void;
 }
@@ -23,7 +27,9 @@ interface HymnReaderProps {
 export function HymnReader({
   hymn,
   isFavorite,
+  note,
   onToggleFavorite,
+  onOpenNoteEditor,
   onBack,
   onNavigateNumber,
 }: HymnReaderProps) {
@@ -60,6 +66,19 @@ export function HymnReader({
             className="tactile-btn flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--ink-primary)] hover:bg-[var(--bg-recessed)] disabled:opacity-35"
           >
             <CaretRight size={18} weight="bold" />
+          </button>
+          <button
+            type="button"
+            onClick={onOpenNoteEditor}
+            aria-label={note ? `Edit note on Hymn #${hymn.number}` : `Add note on Hymn #${hymn.number}`}
+            aria-pressed={Boolean(note)}
+            className={`tactile-btn flex h-10 w-10 items-center justify-center rounded-xl border shadow-[var(--shadow-tactile)] ${
+              note
+                ? 'border-[var(--accent-amber)] bg-[var(--accent-amber-soft)] text-[var(--accent-amber)]'
+                : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--ink-muted)] hover:text-[var(--ink-primary)]'
+            }`}
+          >
+            <NotePencil size={19} weight={note ? 'fill' : 'regular'} />
           </button>
           <button
             type="button"
@@ -138,6 +157,22 @@ export function HymnReader({
           </button>
         </div>
       </header>
+
+      {note && (
+        <button
+          type="button"
+          onClick={onOpenNoteEditor}
+          className="tactile-btn mt-4 flex w-full items-start gap-2.5 rounded-2xl border border-[var(--accent-amber)]/50 bg-[var(--accent-amber-soft)]/55 p-3.5 text-left"
+        >
+          <NotePencil size={17} weight="fill" className="mt-0.5 shrink-0 text-[var(--accent-amber)]" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink-secondary)]">
+              Personal Hymn Note
+            </p>
+            <p className="mt-0.5 line-clamp-2 text-sm text-[var(--ink-primary)]">{note.noteText}</p>
+          </div>
+        </button>
+      )}
 
       {/* Main Content */}
       <div className="mt-4">

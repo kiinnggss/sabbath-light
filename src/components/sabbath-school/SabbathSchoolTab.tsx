@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   CalendarCheck,
@@ -7,6 +7,9 @@ import {
   WarningCircle,
 } from '@phosphor-icons/react';
 import type { SabbathSchoolEdition } from '../../hooks/usePreferences';
+import type { SaveNoteInput } from '../../hooks/useNotes';
+import { makeSSBlockRef, makeSSReflectionRef } from '../../lib/noteReferences';
+import type { StudyNote } from '../../lib/offlineDb';
 import {
   extractMemoryText,
   fetchDayRead,
@@ -24,17 +27,34 @@ import {
   type SSLessonSummary,
   type SSQuarterlySummary,
 } from '../../lib/sabbathSchoolApi';
+import type { NoteEditorRequest } from '../notes/NoteEditorSheet';
 import { CornerstonePdfReader } from './CornerstonePdfReader';
+import { DailyReflectionCard } from './DailyReflectionCard';
 import { DaySwitcher } from './DaySwitcher';
 import { EditionSwitcher } from './EditionSwitcher';
 import { LessonContent } from './LessonContent';
 import { MemoryTextCard } from './MemoryTextCard';
 import { QuarterlyArchiveModal } from './QuarterlyArchiveModal';
 
+export interface SabbathSchoolJumpTarget {
+  edition: SabbathSchoolEdition;
+  quarterlyId: string;
+  lessonId: string;
+  dayId: string;
+  blockIdx?: number;
+  isReflection?: boolean;
+  seq: number;
+}
+
 interface SabbathSchoolTabProps {
   edition: SabbathSchoolEdition;
   onEditionChange: (edition: SabbathSchoolEdition) => void;
   onOpenScripture: (reference: string, verseAttr?: string) => void;
+  notesByRefId: Map<string, StudyNote>;
+  onOpenNoteEditor: (req: NoteEditorRequest) => void;
+  onSaveNote: (input: SaveNoteInput) => Promise<StudyNote | null>;
+  onDeleteNote: (noteId: string) => Promise<void>;
+  jumpTarget: SabbathSchoolJumpTarget | null;
 }
 
 function getOptimisticQuarterlyId(edition: SabbathSchoolEdition): string {
@@ -44,10 +64,21 @@ function getOptimisticQuarterlyId(edition: SabbathSchoolEdition): string {
   return prefix;
 }
 
+const EDITION_LABEL: Record<SabbathSchoolEdition, string> = {
+  adult: 'Adult',
+  inverse: 'Inverse',
+  cornerstone: 'Cornerstone',
+};
+
 export function SabbathSchoolTab({
   edition,
   onEditionChange,
   onOpenScripture,
+  notesByRefId,
+  onOpenNoteEditor,
+  onSaveNote,
+  onDeleteNote,
+  jumpTarget,
 }: SabbathSchoolTabProps) {
   const [allQuarterlies, setAllQuarterlies] = useState<SSQuarterlySummary[]>([]);
   const [selectedQuarterlyId, setSelectedQuarterlyId] = useState<string>(() =>
@@ -62,15 +93,34 @@ export function SabbathSchoolTab({
   const [dayRead, setDayRead] = useState<SSDayRead | null>(null);
   const [memoryText, setMemoryText] = useState<ExtractedMemoryText | null>(null);
 
+  const [focusBlockIdx, setFocusBlockIdx] = useState<number | undefined>(undefined);
+  const [highlightReflection, setHighlightReflection] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [dayLoading, setDayLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
 
+  const pendingJumpRef = useRef<SabbathSchoolJumpTarget | null>(null);
+
   const editionQuarterlies = useMemo(
     () => filterQuarterliesByEdition(allQuarterlies, edition),
     [allQuarterlies, edition],
   );
+
+  // Handle explicit 1-tap jump from My Notes
+  useEffect(() => {
+    if (!jumpTarget) return;
+    pendingJumpRef.current = jumpTarget;
+    setFocusBlockIdx(jumpTarget.blockIdx);
+    setHighlightReflection(Boolean(jumpTarget.isReflection));
+    if (jumpTarget.edition !== edition) {
+      onEditionChange(jumpTarget.edition);
+    }
+    setSelectedQuarterlyId(jumpTarget.quarterlyId);
+    setSelectedLessonId(jumpTarget.lessonId);
+    setSelectedDayId(jumpTarget.dayId);
+  }, [jumpTarget, edition, onEditionChange]);
 
   // 1. Load global quarterlies index in the background for Archive + fallback resolution
   useEffect(() => {
@@ -89,8 +139,12 @@ export function SabbathSchoolTab({
     };
   }, []);
 
-  // 2. Immediately resolve optimistic quarterly ID when edition switches, or refine once index arrives
+  // 2. Immediately resolve optimistic quarterly ID when edition switches, unless a jump is pending
   useEffect(() => {
+    if (pendingJumpRef.current && pendingJumpRef.current.edition === edition) {
+      setSelectedQuarterlyId(pendingJumpRef.current.quarterlyId);
+      return;
+    }
     if (editionQuarterlies.length > 0) {
       const active = resolveActiveQuarterly(editionQuarterlies, new Date());
       if (active) {
@@ -101,7 +155,7 @@ export function SabbathSchoolTab({
     setSelectedQuarterlyId(getOptimisticQuarterlyId(edition));
   }, [edition, editionQuarterlies]);
 
-  // 3. Load quarterly detail & resolve active lesson for today
+  // 3. Load quarterly detail & resolve active lesson (or pending jump lesson)
   useEffect(() => {
     if (!selectedQuarterlyId) return;
     let cancelled = false;
@@ -110,14 +164,25 @@ export function SabbathSchoolTab({
         setLoading(true);
         setQuarterlyMeta(null);
         setLessonDetail(null);
-        setSelectedLessonId('');
+        const jumpLessonId =
+          pendingJumpRef.current?.quarterlyId === selectedQuarterlyId
+            ? pendingJumpRef.current.lessonId
+            : '';
+        if (!jumpLessonId) {
+          setSelectedLessonId('');
+        }
         const detail = await fetchQuarterlyDetail(selectedQuarterlyId);
         if (cancelled) return;
         setQuarterlyMeta(detail.quarterly);
         setLessons(detail.lessons);
-        const activeLesson = resolveActiveLesson(detail.lessons, new Date());
-        if (activeLesson) {
-          setSelectedLessonId(activeLesson.id);
+
+        if (jumpLessonId) {
+          setSelectedLessonId(jumpLessonId);
+        } else {
+          const activeLesson = resolveActiveLesson(detail.lessons, new Date());
+          if (activeLesson) {
+            setSelectedLessonId(activeLesson.id);
+          }
         }
         setError(null);
       } catch (err) {
@@ -148,7 +213,19 @@ export function SabbathSchoolTab({
         if (detail.days.length > 0) {
           const activeDay = resolveActiveDay(detail.days, new Date());
           setTodayDayId(activeDay?.id || null);
-          setSelectedDayId(activeDay?.id || detail.days[0].id);
+
+          const pending = pendingJumpRef.current;
+          if (
+            pending &&
+            pending.quarterlyId === selectedQuarterlyId &&
+            pending.lessonId === selectedLessonId
+          ) {
+            const exists = detail.days.some((d) => d.id === pending.dayId);
+            setSelectedDayId(exists ? pending.dayId : activeDay?.id || detail.days[0].id);
+            pendingJumpRef.current = null;
+          } else {
+            setSelectedDayId(activeDay?.id || detail.days[0].id);
+          }
 
           // Pre-fetch Day 01 for pinned weekly Memory Text
           const day01 = detail.days.find((d) => d.id === '01') || detail.days[0];
@@ -166,6 +243,9 @@ export function SabbathSchoolTab({
           setSelectedDayId('');
           setDayRead(null);
           setMemoryText(null);
+          if (pendingJumpRef.current?.lessonId === selectedLessonId) {
+            pendingJumpRef.current = null;
+          }
         }
         setError(null);
       } catch (err) {
@@ -210,12 +290,24 @@ export function SabbathSchoolTab({
     };
   }, [selectedQuarterlyId, selectedLessonId, selectedDayId]);
 
+  // Scroll smoothly to Reflection card when jumped from My Notes
+  useEffect(() => {
+    if (!highlightReflection || dayLoading) return;
+    const el = document.getElementById('ss-daily-reflection');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [highlightReflection, dayLoading, dayRead]);
+
   const currentLessonIdx = useMemo(
     () => lessons.findIndex((l) => l.id === selectedLessonId),
     [lessons, selectedLessonId],
   );
 
   const jumpToToday = useCallback(() => {
+    pendingJumpRef.current = null;
+    setFocusBlockIdx(undefined);
+    setHighlightReflection(false);
     const q = resolveActiveQuarterly(editionQuarterlies, new Date());
     if (q) setSelectedQuarterlyId(q.id);
     if (lessons.length > 0) {
@@ -232,10 +324,27 @@ export function SabbathSchoolTab({
     Boolean(lessonDetail?.lesson.pdfOnly) ||
     Boolean(lessonDetail && lessonDetail.days.length === 0 && lessonDetail.pdfs.length > 0);
 
+  const effectiveDayId = selectedDayId || '01';
+  const reflectionRefId = selectedQuarterlyId && selectedLessonId
+    ? makeSSReflectionRef(edition, selectedQuarterlyId, selectedLessonId, effectiveDayId)
+    : '';
+  const reflectionLabel = dayRead
+    ? `${EDITION_LABEL[edition]} Lesson ${selectedLessonId} · ${dayRead.title}`
+    : `${EDITION_LABEL[edition]} Lesson ${selectedLessonId}`;
+  const existingReflection = reflectionRefId ? notesByRefId.get(reflectionRefId) : undefined;
+
   return (
     <div className="space-y-4 py-4 pb-10">
       {/* Top 3-Edition Switcher */}
-      <EditionSwitcher edition={edition} onChange={onEditionChange} />
+      <EditionSwitcher
+        edition={edition}
+        onChange={(next) => {
+          pendingJumpRef.current = null;
+          setFocusBlockIdx(undefined);
+          setHighlightReflection(false);
+          onEditionChange(next);
+        }}
+      />
 
       {error && (
         <div className="flex items-start gap-3 rounded-2xl border border-[var(--accent-primary)]/50 bg-[var(--bg-surface)] p-4 text-sm">
@@ -296,9 +405,11 @@ export function SabbathSchoolTab({
             <button
               type="button"
               disabled={currentLessonIdx <= 0}
-              onClick={() =>
-                currentLessonIdx > 0 && setSelectedLessonId(lessons[currentLessonIdx - 1].id)
-              }
+              onClick={() => {
+                setFocusBlockIdx(undefined);
+                setHighlightReflection(false);
+                if (currentLessonIdx > 0) setSelectedLessonId(lessons[currentLessonIdx - 1].id);
+              }}
               className="tactile-btn inline-flex h-9 items-center gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3 text-xs font-semibold text-[var(--ink-primary)] disabled:opacity-35"
             >
               <CaretLeft size={14} weight="bold" />
@@ -312,11 +423,13 @@ export function SabbathSchoolTab({
             <button
               type="button"
               disabled={currentLessonIdx < 0 || currentLessonIdx >= lessons.length - 1}
-              onClick={() =>
-                currentLessonIdx >= 0 &&
-                currentLessonIdx < lessons.length - 1 &&
-                setSelectedLessonId(lessons[currentLessonIdx + 1].id)
-              }
+              onClick={() => {
+                setFocusBlockIdx(undefined);
+                setHighlightReflection(false);
+                if (currentLessonIdx >= 0 && currentLessonIdx < lessons.length - 1) {
+                  setSelectedLessonId(lessons[currentLessonIdx + 1].id);
+                }
+              }}
               className="tactile-btn inline-flex h-9 items-center gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3 text-xs font-semibold text-[var(--ink-primary)] disabled:opacity-35"
             >
               <span>Next Week</span>
@@ -337,10 +450,31 @@ export function SabbathSchoolTab({
           <div className="h-64 w-full animate-pulse rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]" />
         </div>
       ) : isPdfOnly && lessonDetail ? (
-        <CornerstonePdfReader
-          pdfs={lessonDetail.pdfs}
-          onOpenScripture={(ref) => onOpenScripture(ref)}
-        />
+        <div className="space-y-4">
+          <CornerstonePdfReader
+            pdfs={lessonDetail.pdfs}
+            onOpenScripture={(ref) => onOpenScripture(ref)}
+          />
+          {reflectionRefId && (
+            <DailyReflectionCard
+              referenceLabel={`${EDITION_LABEL[edition]} Lesson ${selectedLessonId}`}
+              quoteSnippet={lessonDetail.lesson.title}
+              existingNote={existingReflection}
+              highlighted={highlightReflection}
+              onSaveReflection={async (text) => {
+                await onSaveNote({
+                  id: existingReflection?.id,
+                  sourceType: 'sabbath-school',
+                  referenceId: reflectionRefId,
+                  referenceLabel: `${EDITION_LABEL[edition]} Lesson ${selectedLessonId}`,
+                  quoteSnippet: lessonDetail.lesson.title,
+                  noteText: text,
+                });
+              }}
+              onDeleteReflection={onDeleteNote}
+            />
+          )}
+        </div>
       ) : (
         <>
           {lessonDetail && lessonDetail.days.length > 0 && (
@@ -349,23 +483,78 @@ export function SabbathSchoolTab({
               days={lessonDetail.days}
               activeDayId={selectedDayId}
               todayDayId={todayDayId}
-              onSelectDay={(id) => setSelectedDayId(id)}
+              onSelectDay={(id) => {
+                setFocusBlockIdx(undefined);
+                setHighlightReflection(false);
+                setSelectedDayId(id);
+              }}
             />
           )}
 
           {dayLoading ? (
             <div className="h-72 w-full animate-pulse rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]" />
           ) : dayRead ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2 px-1">
-                <h3 className="font-display text-lg font-bold text-[var(--ink-primary)]">
-                  {dayRead.title}
-                </h3>
+                <div>
+                  <h3 className="font-display text-lg font-bold text-[var(--ink-primary)]">
+                    {dayRead.title}
+                  </h3>
+                  <p className="text-[11px] font-medium text-[var(--ink-muted)]">
+                    Tap any verse link for Scripture preview, or tap a paragraph to attach a note
+                  </p>
+                </div>
                 <span className="text-xs font-medium text-[var(--ink-muted)]">
                   {dayRead.date}
                 </span>
               </div>
-              <LessonContent html={dayRead.content} onOpenScripture={onOpenScripture} />
+
+              <LessonContent
+                html={dayRead.content}
+                edition={edition}
+                quarterlyId={selectedQuarterlyId}
+                lessonId={selectedLessonId}
+                dayId={effectiveDayId}
+                focusBlockIdx={focusBlockIdx}
+                notesByRefId={notesByRefId}
+                onOpenScripture={onOpenScripture}
+                onSelectBlockNote={(blockIdx, snippet) => {
+                  const refId = makeSSBlockRef(
+                    edition,
+                    selectedQuarterlyId,
+                    selectedLessonId,
+                    effectiveDayId,
+                    blockIdx,
+                  );
+                  onOpenNoteEditor({
+                    sourceType: 'sabbath-school',
+                    referenceId: refId,
+                    referenceLabel: `${reflectionLabel} · Paragraph ${blockIdx + 1}`,
+                    quoteSnippet: snippet,
+                    existingNote: notesByRefId.get(refId),
+                  });
+                }}
+              />
+
+              {reflectionRefId && (
+                <DailyReflectionCard
+                  referenceLabel={reflectionLabel}
+                  quoteSnippet={lessonDetail?.lesson.title || dayRead.title}
+                  existingNote={existingReflection}
+                  highlighted={highlightReflection}
+                  onSaveReflection={async (text) => {
+                    await onSaveNote({
+                      id: existingReflection?.id,
+                      sourceType: 'sabbath-school',
+                      referenceId: reflectionRefId,
+                      referenceLabel: reflectionLabel,
+                      quoteSnippet: lessonDetail?.lesson.title || dayRead.title,
+                      noteText: text,
+                    });
+                  }}
+                  onDeleteReflection={onDeleteNote}
+                />
+              )}
             </div>
           ) : null}
         </>
@@ -378,8 +567,14 @@ export function SabbathSchoolTab({
         activeQuarterlyId={selectedQuarterlyId}
         lessons={lessons}
         activeLessonId={selectedLessonId}
-        onSelectQuarterly={(id) => setSelectedQuarterlyId(id)}
-        onSelectLesson={(id) => setSelectedLessonId(id)}
+        onSelectQuarterly={(id) => {
+          pendingJumpRef.current = null;
+          setSelectedQuarterlyId(id);
+        }}
+        onSelectLesson={(id) => {
+          pendingJumpRef.current = null;
+          setSelectedLessonId(id);
+        }}
       />
     </div>
   );

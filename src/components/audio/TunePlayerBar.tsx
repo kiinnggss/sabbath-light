@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowCounterClockwise,
   Metronome,
@@ -8,12 +8,17 @@ import {
   SlidersHorizontal,
 } from '@phosphor-icons/react';
 import type { HymnEntry } from '../../data/hymnalTypes';
-import { getTuneSequenceForHymn } from '../../data/melodies';
-import { hymnSynth, type SynthPlaybackState } from './hymnSynth';
+import {
+  formatMidiFilename,
+  midiPlayer,
+  type MidiPlaybackState,
+} from './midiPlayer';
 
 interface TunePlayerBarProps {
   hymn: HymnEntry;
 }
+
+const SPEED_PRESETS = [0.75, 0.9, 1.0, 1.1, 1.25] as const;
 
 function formatTime(sec: number): string {
   const safe = Math.max(0, Math.floor(sec));
@@ -23,26 +28,62 @@ function formatTime(sec: number): string {
 }
 
 export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
-  const tune = useMemo(() => getTuneSequenceForHymn(hymn), [hymn]);
-  const [playback, setPlayback] = useState<SynthPlaybackState>(() => hymnSynth.getState());
+  const [playback, setPlayback] = useState<MidiPlaybackState>(() => midiPlayer.getState());
   const [showTempoPanel, setShowTempoPanel] = useState(false);
+  const [startingAudio, setStartingAudio] = useState(false);
 
   useEffect(() => {
-    hymnSynth.loadTune(tune);
-    const unsub = hymnSynth.subscribe(setPlayback);
+    const unsub = midiPlayer.subscribe(setPlayback);
+    void midiPlayer.loadHymn(hymn.number, hymn.defaultBpm || 96);
     return () => {
       unsub();
-      hymnSynth.stop();
+      midiPlayer.stop();
     };
-  }, [tune]);
+  }, [hymn.number, hymn.defaultBpm]);
 
   const handlePlayPause = async () => {
+    if (playback.status !== 'ready') return;
     if (playback.isPlaying) {
-      hymnSynth.pause();
+      midiPlayer.pause();
     } else {
-      await hymnSynth.play();
+      setStartingAudio(true);
+      try {
+        await midiPlayer.play();
+      } finally {
+        setStartingAudio(false);
+      }
     }
   };
+
+  if (playback.status === 'unavailable' || playback.status === 'error') {
+    return (
+      <section
+        aria-label="Hymn Tune Player"
+        className="fixed bottom-[calc(5.15rem+env(safe-area-inset-bottom))] left-1/2 z-30 w-[calc(100%-1.5rem)] max-w-2xl -translate-x-1/2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-3 shadow-[0_-4px_20px_rgba(19,6,3,0.10)]"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-recessed)] text-[var(--ink-muted)]">
+              <PianoKeys size={20} weight="duotone" />
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-xs font-bold text-[var(--ink-primary)]">
+                Piano track not yet added for this hymn
+              </p>
+              <p className="truncate text-[11px] text-[var(--ink-muted)]">
+                {hymn.tuneName || `Hymn #${hymn.number}`} · Expected{' '}
+                <code className="font-[family-name:var(--font-mono)]">
+                  midi/{formatMidiFilename(hymn.number)}
+                </code>
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const isLoadingTrack = playback.status === 'loading' || startingAudio;
 
   return (
     <section
@@ -53,11 +94,20 @@ export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
         {/* Chunky Yoto-inspired Play/Pause */}
         <button
           type="button"
+          disabled={isLoadingTrack || playback.status !== 'ready'}
           onClick={handlePlayPause}
-          aria-label={playback.isPlaying ? 'Pause hymn tune' : 'Play hymn tune'}
-          className="tactile-btn flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-[var(--shadow-tactile)] hover:bg-[var(--accent-primary-hover)]"
+          aria-label={
+            isLoadingTrack
+              ? 'Loading piano samples'
+              : playback.isPlaying
+                ? 'Pause hymn tune'
+                : 'Play hymn tune'
+          }
+          className="tactile-btn flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-[var(--shadow-tactile)] hover:bg-[var(--accent-primary-hover)] disabled:opacity-55"
         >
-          {playback.isPlaying ? (
+          {isLoadingTrack ? (
+            <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          ) : playback.isPlaying ? (
             <Pause size={22} weight="fill" />
           ) : (
             <Play size={22} weight="fill" className="translate-x-0.5" />
@@ -69,10 +119,10 @@ export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <p className="truncate text-xs font-bold uppercase tracking-wide text-[var(--ink-primary)]">
-                {tune.tuneName}
+                {hymn.tuneName || `Hymn #${hymn.number}`}
               </p>
               <p className="truncate text-[11px] text-[var(--ink-muted)]">
-                {tune.key} · {playback.bpm} BPM
+                {hymn.key || 'Grand Piano'} · {playback.effectiveBpm} BPM ({playback.speed.toFixed(2)}x)
               </p>
             </div>
 
@@ -80,7 +130,7 @@ export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
               <button
                 type="button"
                 onClick={() =>
-                  hymnSynth.setVoice(playback.voice === 'organ' ? 'piano' : 'organ')
+                  void midiPlayer.setVoice(playback.voice === 'piano' ? 'organ' : 'piano')
                 }
                 aria-label={`Switch instrument sound, currently ${playback.voice}`}
                 className="tactile-btn inline-flex h-8 items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-recessed)] px-2.5 text-xs font-semibold text-[var(--ink-secondary)] hover:border-[var(--border-strong)]"
@@ -101,7 +151,7 @@ export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
                 }`}
               >
                 <SlidersHorizontal size={14} weight="bold" />
-                <span>Tempo</span>
+                <span>{playback.speed.toFixed(2)}x</span>
               </button>
             </div>
           </div>
@@ -112,7 +162,7 @@ export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
               min={0}
               max={1000}
               value={Math.round(playback.progress * 1000)}
-              onChange={(e) => hymnSynth.seek(Number(e.target.value) / 1000)}
+              onChange={(e) => midiPlayer.seek(Number(e.target.value) / 1000)}
               aria-label="Seek hymn tune"
               className="tactile-range w-full"
             />
@@ -124,53 +174,59 @@ export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
       </div>
 
       {showTempoPanel && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border-subtle)] pt-3">
-          <div className="flex items-center gap-2 text-xs font-semibold text-[var(--ink-secondary)]">
-            <Metronome size={16} weight="duotone" className="text-[var(--accent-primary)]" />
-            <span>Tempo</span>
-            <span className="rounded-md bg-[var(--bg-recessed)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-xs font-bold tabular-nums text-[var(--ink-primary)]">
-              {playback.bpm} BPM
-            </span>
-          </div>
+        <div className="mt-3 space-y-2.5 border-t border-[var(--border-subtle)] pt-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-semibold text-[var(--ink-secondary)]">
+              <Metronome size={16} weight="duotone" className="text-[var(--accent-primary)]" />
+              <span>Tempo Speed</span>
+              <span className="rounded-md bg-[var(--bg-recessed)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-xs font-bold tabular-nums text-[var(--ink-primary)]">
+                {playback.speed.toFixed(2)}x · {playback.effectiveBpm} BPM
+              </span>
+            </div>
 
-          <div className="flex flex-1 items-center gap-2 min-w-[180px]">
             <button
               type="button"
-              onClick={() => hymnSynth.setBpm(playback.bpm - 5)}
-              aria-label="Decrease tempo"
-              className="tactile-btn flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-recessed)] text-sm font-bold text-[var(--ink-primary)]"
+              onClick={() => midiPlayer.setSpeed(1.0)}
+              aria-label="Reset tempo to normal speed"
+              className="tactile-btn inline-flex h-8 items-center gap-1 rounded-lg border border-[var(--border-subtle)] px-2.5 text-xs font-semibold text-[var(--ink-secondary)] hover:bg-[var(--bg-recessed)]"
             >
-              -
+              <ArrowCounterClockwise size={13} />
+              <span>Reset (1.0x)</span>
             </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1">
+              {SPEED_PRESETS.map((preset) => {
+                const active = Math.abs(playback.speed - preset) < 0.015;
+                return (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => midiPlayer.setSpeed(preset)}
+                    className={`tactile-btn h-8 rounded-lg border px-2 font-[family-name:var(--font-mono)] text-[11px] font-bold ${
+                      active
+                        ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--ink-on-accent)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--bg-recessed)] text-[var(--ink-secondary)] hover:border-[var(--border-strong)]'
+                    }`}
+                  >
+                    {preset}x
+                  </button>
+                );
+              })}
+            </div>
+
             <input
               type="range"
-              min={55}
-              max={145}
-              step={1}
-              value={playback.bpm}
-              onChange={(e) => hymnSynth.setBpm(Number(e.target.value))}
-              aria-label="Tempo BPM slider"
-              className="tactile-range w-full"
+              min={0.75}
+              max={1.25}
+              step={0.05}
+              value={playback.speed}
+              onChange={(e) => midiPlayer.setSpeed(Number(e.target.value))}
+              aria-label="Tempo speed slider"
+              className="tactile-range min-w-[140px] flex-1"
             />
-            <button
-              type="button"
-              onClick={() => hymnSynth.setBpm(playback.bpm + 5)}
-              aria-label="Increase tempo"
-              className="tactile-btn flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-recessed)] text-sm font-bold text-[var(--ink-primary)]"
-            >
-              +
-            </button>
           </div>
-
-          <button
-            type="button"
-            onClick={() => hymnSynth.setBpm(tune.defaultBpm)}
-            aria-label="Reset tempo to default"
-            className="tactile-btn inline-flex h-8 items-center gap-1 rounded-lg border border-[var(--border-subtle)] px-2.5 text-xs font-semibold text-[var(--ink-secondary)] hover:bg-[var(--bg-recessed)]"
-          >
-            <ArrowCounterClockwise size={13} />
-            <span>Reset ({tune.defaultBpm})</span>
-          </button>
         </div>
       )}
     </section>

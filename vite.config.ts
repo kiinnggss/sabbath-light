@@ -51,7 +51,11 @@ export default defineConfig(({ mode }) => {
           skipWaiting: true,
           clientsClaim: true,
           cleanupOutdatedCaches: true,
-          globPatterns: ['**/*.{js,css,html,svg,png,woff2,json,mjs}'],
+          navigateFallbackDenylist: [
+            new RegExp(`^${base}midi/`),
+            new RegExp(`^${base}samples/`),
+          ],
+          globPatterns: ['**/*.{js,css,html,svg,png,woff2,json,mjs,mp3,mid}'],
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           runtimeCaching: [
             {

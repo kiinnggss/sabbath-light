@@ -1,5 +1,14 @@
 import { BIBLE_BOOK_BY_ID } from '../data/bibleBooks';
 import type { BibleVersionId } from '../hooks/usePreferences';
+import {
+  getOfflineBibleChapter,
+  getOfflineBibleVersions,
+  putBibleChaptersBatch,
+  putOfflineBibleChapter,
+  putOfflineBibleVersionMeta,
+  searchOfflineBibleVersion,
+  type OfflineBibleChapterRecord,
+} from './offlineDb';
 
 export interface BibleVersionMeta {
   id: BibleVersionId;
@@ -95,7 +104,7 @@ function extractHelloAoVerses(payload: HelloAoChapterResponse): BibleVerse[] {
   return verses;
 }
 
-function readLocalChapter(cacheKey: string): BibleVerse[] | null {
+function readLegacyLocalChapter(cacheKey: string): BibleVerse[] | null {
   try {
     const raw = localStorage.getItem(`${STORAGE_PREFIX}${cacheKey}`);
     if (!raw) return null;
@@ -103,14 +112,6 @@ function readLocalChapter(cacheKey: string): BibleVerse[] | null {
     return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
   } catch {
     return null;
-  }
-}
-
-function writeLocalChapter(cacheKey: string, verses: BibleVerse[]): void {
-  try {
-    localStorage.setItem(`${STORAGE_PREFIX}${cacheKey}`, JSON.stringify(verses));
-  } catch {
-    // Ignore storage quota full
   }
 }
 
@@ -122,6 +123,12 @@ export async function fetchBibleChapter(
   const cacheKey = `${version}:${bookId}:${chapter}`;
   const inMem = chapterCache.get(cacheKey);
   if (inMem) return inMem;
+
+  const idbCached = await getOfflineBibleChapter(version, bookId, chapter).catch(() => null);
+  if (idbCached) {
+    chapterCache.set(cacheKey, idbCached);
+    return idbCached;
+  }
 
   const meta = BIBLE_VERSIONS.find((v) => v.id === version);
   const book = BIBLE_BOOK_BY_ID.get(bookId);
@@ -149,28 +156,39 @@ export async function fetchBibleChapter(
     }
 
     chapterCache.set(cacheKey, verses);
-    writeLocalChapter(cacheKey, verses);
+    await putOfflineBibleChapter(version, bookId, chapter, verses).catch(() => {});
     return verses;
   } catch (err) {
-    const offline = readLocalChapter(cacheKey);
-    if (offline) {
-      chapterCache.set(cacheKey, offline);
-      return offline;
+    const legacy = readLegacyLocalChapter(cacheKey);
+    if (legacy) {
+      chapterCache.set(cacheKey, legacy);
+      await putOfflineBibleChapter(version, bookId, chapter, legacy).catch(() => {});
+      return legacy;
     }
 
-    // Fallback to HelloAO for KJV/WEB if Bolls fails
-    if (version === 'KJV' || version === 'WEB') {
+    // Fallback to HelloAO for KJV/WEB if Bolls fails while online
+    if (typeof navigator !== 'undefined' && navigator.onLine && (version === 'KJV' || version === 'WEB')) {
       const fallbackId = version === 'KJV' ? 'eng_kjv' : 'ENGWEBP';
-      const res = await fetch(
-        `https://bible.helloao.org/api/${fallbackId}/${book.usfm}/${chapter}.json`,
-      );
-      if (res.ok) {
-        const json = (await res.json()) as HelloAoChapterResponse;
-        const verses = extractHelloAoVerses(json);
-        chapterCache.set(cacheKey, verses);
-        writeLocalChapter(cacheKey, verses);
-        return verses;
+      try {
+        const res = await fetch(
+          `https://bible.helloao.org/api/${fallbackId}/${book.usfm}/${chapter}.json`,
+        );
+        if (res.ok) {
+          const json = (await res.json()) as HelloAoChapterResponse;
+          const verses = extractHelloAoVerses(json);
+          chapterCache.set(cacheKey, verses);
+          await putOfflineBibleChapter(version, bookId, chapter, verses).catch(() => {});
+          return verses;
+        }
+      } catch {
+        // Fall through to offline error below
       }
+    }
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      throw new Error(
+        `Offline: ${book.name} ${chapter} (${version}) is not saved yet. Download ${version} in the Bible version switcher while online.`,
+      );
     }
 
     throw err instanceof Error ? err : new Error('Failed to load Bible chapter');
@@ -190,6 +208,123 @@ export async function fetchCompareChapters(
   return { left, right };
 }
 
+interface RawBulkVerse {
+  book: number;
+  chapter: number;
+  verse: number;
+  text: string;
+}
+
+/**
+ * Downloads an entire English translation JSON from bolls.life and indexes all
+ * 1,189 chapters into IndexedDB without blocking the UI thread.
+ */
+export async function downloadBibleVersionOffline(
+  version: BibleVersionId,
+  onProgress?: (pct: number, detail: string) => void,
+): Promise<{ chapterCount: number; verseCount: number }> {
+  onProgress?.(3, `Connecting for ${version}...`);
+  const res = await fetch(`https://bolls.life/static/translations/${version}.json`);
+  if (!res.ok) {
+    throw new Error(`Failed downloading ${version} (${res.status})`);
+  }
+
+  let jsonText: string;
+  const contentLength = Number(res.headers.get('content-length') || 0);
+
+  if (res.body && typeof res.body.getReader === 'function') {
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        chunks.push(value);
+        received += value.byteLength;
+        if (contentLength > 0) {
+          const pct = Math.min(78, Math.max(5, Math.round((received / contentLength) * 78)));
+          const mb = (received / (1024 * 1024)).toFixed(1);
+          const totalMb = (contentLength / (1024 * 1024)).toFixed(1);
+          onProgress?.(pct, `Downloading ${version} (${mb}/${totalMb} MB)...`);
+        } else {
+          onProgress?.(40, `Downloading ${version}...`);
+        }
+      }
+    }
+
+    const totalLen = chunks.reduce((acc, c) => acc + c.byteLength, 0);
+    const combined = new Uint8Array(totalLen);
+    let offset = 0;
+    for (const c of chunks) {
+      combined.set(c, offset);
+      offset += c.byteLength;
+    }
+    jsonText = new TextDecoder().decode(combined);
+  } else {
+    onProgress?.(45, `Downloading ${version}...`);
+    jsonText = await res.text();
+  }
+
+  onProgress?.(81, `Indexing ${version} chapters...`);
+  const rawList = JSON.parse(jsonText) as RawBulkVerse[];
+
+  const grouped = new Map<string, OfflineBibleChapterRecord>();
+  let verseCount = 0;
+  const now = Date.now();
+
+  for (const row of rawList) {
+    const bookId = Number(row.book);
+    const chapter = Number(row.chapter);
+    const verseNum = Number(row.verse);
+    if (bookId < 1 || bookId > 66 || chapter < 1 || verseNum < 1) continue;
+    if (!BIBLE_BOOK_BY_ID.has(bookId)) continue;
+
+    const clean = sanitizeBollsVerseText(row.text);
+    if (!clean) continue;
+
+    const key = `${version}:${bookId}:${chapter}`;
+    let record = grouped.get(key);
+    if (!record) {
+      record = {
+        key,
+        version,
+        bookId,
+        chapter,
+        verses: [],
+        updatedAt: now,
+      };
+      grouped.set(key, record);
+    }
+    record.verses.push({ verse: verseNum, text: clean });
+    verseCount += 1;
+  }
+
+  const allRecords = Array.from(grouped.values());
+  const CHUNK_SIZE = 60;
+  for (let i = 0; i < allRecords.length; i += CHUNK_SIZE) {
+    const slice = allRecords.slice(i, i + CHUNK_SIZE);
+    await putBibleChaptersBatch(slice);
+    for (const r of slice) {
+      chapterCache.set(r.key, r.verses);
+    }
+    const pct = 82 + Math.round(((i + slice.length) / Math.max(1, allRecords.length)) * 17);
+    onProgress?.(Math.min(99, pct), `Saving ${i + slice.length}/${allRecords.length} chapters...`);
+    await new Promise((r) => setTimeout(r, 0));
+  }
+
+  await putOfflineBibleVersionMeta({
+    version,
+    downloadedAt: Date.now(),
+    chapterCount: allRecords.length,
+    verseCount,
+  });
+
+  onProgress?.(100, `Saved ${version} offline (${allRecords.length} chapters)`);
+  return { chapterCount: allRecords.length, verseCount };
+}
+
 export async function searchBibleText(
   version: BibleVersionId,
   query: string,
@@ -197,6 +332,25 @@ export async function searchBibleText(
 ): Promise<{ total: number; hits: BibleSearchHit[]; note?: string }> {
   const trimmed = query.trim();
   if (!trimmed) return { total: 0, hits: [] };
+
+  const downloaded = await getOfflineBibleVersions().catch(() => []);
+  const hasFullOffline = downloaded.some((m) => m.version === version);
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+
+  if (hasFullOffline || isOffline) {
+    const bookMap = new Map<number, string>();
+    for (const [id, meta] of BIBLE_BOOK_BY_ID.entries()) {
+      bookMap.set(id, meta.name);
+    }
+    const hits = await searchOfflineBibleVersion(version, trimmed, bookMap, 40);
+    return {
+      total: hits.length,
+      hits,
+      note: hasFullOffline
+        ? `Searched full offline copy of ${version}.`
+        : `Offline mode: searched locally cached ${version} chapters.`,
+    };
+  }
 
   // HelloAO has no full-text search endpoint, so cross-query via Bolls WEB and resolve BSB verses if possible
   const searchSlug = version === 'BSB' ? 'WEB' : version;
@@ -226,7 +380,6 @@ export async function searchBibleText(
   }));
 
   if (version === 'BSB' && hits.length > 0) {
-    // Hydrate top 12 BSB matching verses cleanly
     const uniqueChaps = new Map<string, Promise<BibleVerse[]>>();
     for (const h of hits.slice(0, 12)) {
       const k = `${h.bookId}:${h.chapter}`;

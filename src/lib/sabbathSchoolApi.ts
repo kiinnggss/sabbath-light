@@ -1,4 +1,5 @@
 import type { SabbathSchoolEdition } from '../hooks/usePreferences';
+import { getSSCache, putSSCache } from './offlineDb';
 
 const API_BASE = 'https://sabbath-school.adventech.io/api/v2/en';
 const CACHE_PREFIX = 'sabbath-light:ss:v1:';
@@ -62,35 +63,59 @@ export interface SSDayRead {
 
 const memCache = new Map<string, unknown>();
 
-async function fetchSSJson<T>(relativePath: string): Promise<T> {
-  const cached = memCache.get(relativePath) as T | undefined;
-  if (cached !== undefined) return cached;
+function extractQuarterlyIdFromPath(relativePath: string): string | undefined {
+  const m = /^quarterlies\/([^/]+)\//.exec(relativePath);
+  return m ? m[1] : undefined;
+}
 
+async function fetchSSJson<T>(
+  relativePath: string,
+  options: { forceNetwork?: boolean } = {},
+): Promise<T> {
+  if (!options.forceNetwork) {
+    const cached = memCache.get(relativePath) as T | undefined;
+    if (cached !== undefined) return cached;
+  }
+
+  const quarterlyId = extractQuarterlyIdFromPath(relativePath);
   const url = `${API_BASE}/${relativePath}`;
   const storageKey = `${CACHE_PREFIX}${relativePath}`;
+
+  // When offline or when IndexedDB already has a snapshot and forceNetwork is not set
+  if (!options.forceNetwork && typeof navigator !== 'undefined' && !navigator.onLine) {
+    const idb = await getSSCache<T>(relativePath).catch(() => null);
+    if (idb !== null) {
+      memCache.set(relativePath, idb);
+      return idb;
+    }
+  }
 
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Sabbath School API HTTP ${res.status}`);
     const data = (await res.json()) as T;
     memCache.set(relativePath, data);
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(data));
-    } catch {
-      // Ignore quota errors
-    }
+    await putSSCache(relativePath, data, quarterlyId).catch(() => {});
     return data;
   } catch (err) {
+    const idb = await getSSCache<T>(relativePath).catch(() => null);
+    if (idb !== null) {
+      memCache.set(relativePath, idb);
+      return idb;
+    }
+
     try {
       const local = localStorage.getItem(storageKey);
       if (local) {
         const parsed = JSON.parse(local) as T;
         memCache.set(relativePath, parsed);
+        await putSSCache(relativePath, parsed, quarterlyId).catch(() => {});
         return parsed;
       }
     } catch {
       // Ignore parse error
     }
+
     throw err instanceof Error ? err : new Error('Failed to load Sabbath School content');
   }
 }
@@ -228,27 +253,38 @@ export function extractMemoryText(day01Html: string): ExtractedMemoryText | null
   return null;
 }
 
-export async function fetchQuarterlies(): Promise<SSQuarterlySummary[]> {
-  return fetchSSJson<SSQuarterlySummary[]>('quarterlies/index.json');
+export async function fetchQuarterlies(options?: {
+  forceNetwork?: boolean;
+}): Promise<SSQuarterlySummary[]> {
+  return fetchSSJson<SSQuarterlySummary[]>('quarterlies/index.json', options);
 }
 
-export async function fetchQuarterlyDetail(quarterlyId: string): Promise<SSQuarterlyDetail> {
-  return fetchSSJson<SSQuarterlyDetail>(`quarterlies/${quarterlyId}/index.json`);
+export async function fetchQuarterlyDetail(
+  quarterlyId: string,
+  options?: { forceNetwork?: boolean },
+): Promise<SSQuarterlyDetail> {
+  return fetchSSJson<SSQuarterlyDetail>(`quarterlies/${quarterlyId}/index.json`, options);
 }
 
 export async function fetchLessonDetail(
   quarterlyId: string,
   lessonId: string,
+  options?: { forceNetwork?: boolean },
 ): Promise<SSLessonDetail> {
-  return fetchSSJson<SSLessonDetail>(`quarterlies/${quarterlyId}/lessons/${lessonId}/index.json`);
+  return fetchSSJson<SSLessonDetail>(
+    `quarterlies/${quarterlyId}/lessons/${lessonId}/index.json`,
+    options,
+  );
 }
 
 export async function fetchDayRead(
   quarterlyId: string,
   lessonId: string,
   dayId: string,
+  options?: { forceNetwork?: boolean },
 ): Promise<SSDayRead> {
   return fetchSSJson<SSDayRead>(
     `quarterlies/${quarterlyId}/lessons/${lessonId}/days/${dayId}/read/index.json`,
+    options,
   );
 }

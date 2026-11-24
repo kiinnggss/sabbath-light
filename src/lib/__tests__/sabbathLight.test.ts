@@ -1,9 +1,26 @@
 import { describe, expect, it } from 'vitest';
+import { formatMidiFilename, isValidMidiBuffer } from '../../components/audio/midiPlayer';
 import { FONT_PRESETS, resolveFontPresetId } from '../../data/fonts';
 import type { HymnalEntry } from '../../data/hymnalTypes';
 import { getContrastTextColor, normalizeHex, resolveThemeId, THEMES } from '../../data/themes';
 import { sanitizeBollsVerseText } from '../bibleApi';
 import { extractJumpNumber, filterAndSearchHymnal } from '../fuzzySearch';
+import {
+  makeBibleNoteRef,
+  makeHymnalNoteRef,
+  makeSSBlockRef,
+  makeSSReflectionRef,
+  parseImportedNotesJson,
+  parseNoteJumpTarget,
+} from '../noteReferences';
+import {
+  deleteNoteById,
+  getAllNotes,
+  getOfflineBibleChapter,
+  putNote,
+  putOfflineBibleChapter,
+  searchOfflineBibleVersion,
+} from '../offlineDb';
 import {
   extractMemoryText,
   filterQuarterliesByEdition,
@@ -182,5 +199,106 @@ describe('themes and font presets', () => {
     expect(FONT_PRESETS).toHaveLength(6);
     expect(resolveFontPresetId('fast-and-loose')).toBe('fast-and-loose');
     expect(resolveFontPresetId('not-a-font')).toBe('sanctuary');
+  });
+});
+
+describe('midi player helpers', () => {
+  it('formats zero-padded MIDI filenames and validates MThd headers', () => {
+    expect(formatMidiFilename(1)).toBe('001.mid');
+    expect(formatMidiFilename(62)).toBe('062.mid');
+    expect(formatMidiFilename(695)).toBe('695.mid');
+
+    const validHeader = new Uint8Array([
+      0x4d, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06, 0x00, 0x01, 0x00, 0x02, 0x01, 0xe0,
+    ]);
+    expect(isValidMidiBuffer(validHeader.buffer)).toBe(true);
+
+    const htmlFallback = new TextEncoder().encode('<!doctype html><html></html>');
+    expect(isValidMidiBuffer(htmlFallback.buffer)).toBe(false);
+  });
+});
+
+describe('notes references and offline storage', () => {
+  it('builds and parses 1-tap jump targets for Bible, Sabbath School, and Hymnal notes', () => {
+    const bibleRef = makeBibleNoteRef(43, 3, 16);
+    expect(parseNoteJumpTarget({ sourceType: 'bible', referenceId: bibleRef })).toEqual({
+      type: 'bible',
+      bookId: 43,
+      chapter: 3,
+      verse: 16,
+    });
+
+    const hymnRef = makeHymnalNoteRef(524);
+    expect(parseNoteJumpTarget({ sourceType: 'hymnal', referenceId: hymnRef })).toEqual({
+      type: 'hymnal',
+      number: 524,
+    });
+
+    const ssBlockRef = makeSSBlockRef('inverse', '2026-04-cq', '09', '03', 4);
+    expect(parseNoteJumpTarget({ sourceType: 'sabbath-school', referenceId: ssBlockRef })).toEqual({
+      type: 'sabbath-school',
+      edition: 'inverse',
+      quarterlyId: '2026-04-cq',
+      lessonId: '09',
+      dayId: '03',
+      blockIdx: 4,
+    });
+
+    const ssRefl = makeSSReflectionRef('adult', '2026-04', '09', '04');
+    expect(parseNoteJumpTarget({ sourceType: 'sabbath-school', referenceId: ssRefl })).toEqual({
+      type: 'sabbath-school',
+      edition: 'adult',
+      quarterlyId: '2026-04',
+      lessonId: '09',
+      dayId: '04',
+      isReflection: true,
+    });
+  });
+
+  it('validates imported JSON backup payloads and persists offline notes/chapters', async () => {
+    const payload = JSON.stringify({
+      app: 'sabbath-light',
+      version: 1,
+      notes: [
+        {
+          sourceType: 'bible',
+          referenceId: 'bible:19:23:1',
+          referenceLabel: 'Psalms 23:1 · NKJV',
+          quoteSnippet: 'The Lord is my shepherd;',
+          noteText: 'Comfort in difficult weeks.',
+        },
+        {
+          sourceType: 'bible',
+          referenceId: 'bad-empty-note',
+          noteText: '   ',
+        },
+      ],
+    });
+
+    const parsed = parseImportedNotesJson(payload);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].referenceId).toBe('bible:19:23:1');
+
+    await putNote(parsed[0]);
+    const listAfterSave = await getAllNotes();
+    expect(listAfterSave.some((n) => n.id === parsed[0].id)).toBe(true);
+
+    await deleteNoteById(parsed[0].id);
+    const listAfterDelete = await getAllNotes();
+    expect(listAfterDelete.some((n) => n.id === parsed[0].id)).toBe(false);
+
+    await putOfflineBibleChapter('NKJV', 43, 3, [
+      { verse: 16, text: 'For God so loved the world that He gave His only begotten Son.' },
+    ]);
+    const ch = await getOfflineBibleChapter('NKJV', 43, 3);
+    expect(ch).toHaveLength(1);
+
+    const hits = await searchOfflineBibleVersion(
+      'NKJV',
+      'begotten Son',
+      new Map([[43, 'John']]),
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ bookName: 'John', chapter: 3, verse: 16 });
   });
 });
