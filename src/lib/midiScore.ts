@@ -11,6 +11,8 @@ export interface ScoreNoteEvent {
   dots: 0 | 1;
   /** True when this event is a rest */
   isRest: boolean;
+  /** True when this chunk continues (is tied from) the previous chunk of the same note */
+  tieFromPrevious: boolean;
   /** VexFlow key strings sorted low to high, e.g. ['f/4', 'a/4', 'c/5'] */
   keys: string[];
   /** Raw MIDI note numbers sorted low to high */
@@ -30,6 +32,8 @@ export interface ScoreMeasure {
   endSec: number;
   treble: ScoreNoteEvent[];
   bass: ScoreNoteEvent[];
+  /** Soprano melody line only (single notes), used for the lyric lead sheet */
+  melody: ScoreNoteEvent[];
 }
 
 export interface ParsedHymnScore {
@@ -39,6 +43,10 @@ export interface ParsedHymnScore {
   timeSignatureLabel: string;
   bpm: number;
   ppq: number;
+  barTicks: number;
+  stepTicks: number;
+  /** Seconds the audio engine trims from the start (audio time = raw MIDI time - this) */
+  audioLeadTrimSec: number;
   measures: ScoreMeasure[];
   /** Suggested single-stanza slice [startIdx, endIdxExclusive] */
   stanzaRange: [number, number];
@@ -262,6 +270,7 @@ function buildStaffEventsForMeasure(
         baseDuration: chunk.baseDuration,
         dots: chunk.dots,
         isRest: true,
+        tieFromPrevious: false,
         keys: [restKey],
         midis: [],
         accidentals: [null],
@@ -300,6 +309,7 @@ function buildStaffEventsForMeasure(
         baseDuration: chunk.baseDuration,
         dots: chunk.dots,
         isRest: true,
+        tieFromPrevious: false,
         keys: [restKey],
         midis: [],
         accidentals: [null],
@@ -346,6 +356,7 @@ function buildStaffEventsForMeasure(
         baseDuration: chunk.baseDuration,
         dots: chunk.dots,
         isRest: false,
+        tieFromPrevious: cIdx > 0,
         keys: spelled.map((s) => s.vexKey),
         midis: sortedMidis,
         accidentals,
@@ -548,6 +559,7 @@ export function extractHymnScore(
   }
 
   const measures: ScoreMeasure[] = [];
+  const melodyByBar = extractSkylineMelodyByBar(trebleRaw, stepTicks, barTicks, measureCount);
   for (let i = 0; i < measureCount; i++) {
     const startTick = i * barTicks;
     const endTick = (i + 1) * barTicks;
@@ -575,6 +587,14 @@ export function extractHymnScore(
         stepTicks,
         measureSixteenths,
         'bass',
+        keySignature,
+      ),
+      melody: buildStaffEventsForMeasure(
+        melodyByBar[i],
+        startTick,
+        stepTicks,
+        measureSixteenths,
+        'treble',
         keySignature,
       ),
     });
@@ -606,6 +626,13 @@ export function extractHymnScore(
     tempoResetBars,
   );
 
+  // Mirror the audio engine's lead-in trim (midiPlayer.extractPlayableMidiData)
+  let firstTick = Infinity;
+  for (const n of trebleRaw) firstTick = Math.min(firstTick, n.ticks);
+  for (const n of bassRaw) firstTick = Math.min(firstTick, n.ticks);
+  const firstNoteSec = Number.isFinite(firstTick) ? parsed.header.ticksToSeconds(firstTick) : 0;
+  const audioLeadTrimSec = firstNoteSec > 1.2 ? firstNoteSec - 0.15 : 0;
+
   return {
     keySignature,
     keyLabel,
@@ -613,11 +640,98 @@ export function extractHymnScore(
     timeSignatureLabel,
     bpm,
     ppq,
+    barTicks,
+    stepTicks,
+    audioLeadTrimSec,
     measures,
     stanzaRange,
     stanzaStarts,
     stanzaLength,
   };
+}
+
+/**
+ * Reduces the treble staff to its top ("skyline") voice: at each onset keep the
+ * highest note, and skip lower onsets while a higher note is still sounding.
+ */
+function extractSkylineMelodyByBar(
+  trebleRaw: RawStaffNote[],
+  stepTicks: number,
+  barTicks: number,
+  measureCount: number,
+): RawStaffNote[][] {
+  const byStep = new Map<number, RawStaffNote>();
+  for (const n of trebleRaw) {
+    const step = Math.round(n.ticks / stepTicks);
+    const existing = byStep.get(step);
+    if (!existing || n.midi > existing.midi) byStep.set(step, n);
+  }
+
+  const result: RawStaffNote[][] = Array.from({ length: measureCount }, () => []);
+  let topMidi = -1;
+  let topEnd = -Infinity;
+  for (const step of [...byStep.keys()].sort((a, b) => a - b)) {
+    const n = byStep.get(step)!;
+    const onset = step * stepTicks;
+    const stillSounding = onset < topEnd - stepTicks * 0.5;
+    if (stillSounding && n.midi < topMidi) continue;
+    topMidi = n.midi;
+    topEnd = n.ticks + n.durationTicks;
+    const barIdx = Math.max(0, Math.min(measureCount - 1, Math.floor((n.ticks + stepTicks * 0.45) / barTicks)));
+    result[barIdx].push(n);
+  }
+  return result;
+}
+
+/** Converts raw MIDI seconds to ticks using per-measure linear interpolation. */
+export function rawSecToTick(score: ParsedHymnScore, rawSec: number): number | null {
+  for (const m of score.measures) {
+    if (rawSec >= m.startSec && rawSec < m.endSec) {
+      const span = Math.max(1e-6, m.endSec - m.startSec);
+      return m.startTick + ((rawSec - m.startSec) / span) * (m.endTick - m.startTick);
+    }
+  }
+  return null;
+}
+
+/** Converts ticks to raw MIDI seconds using per-measure linear interpolation. */
+export function tickToRawSec(score: ParsedHymnScore, tick: number): number {
+  const idx = Math.max(0, Math.min(score.measures.length - 1, Math.floor(tick / score.barTicks)));
+  const m = score.measures[idx];
+  if (!m) return 0;
+  const frac = (tick - m.startTick) / Math.max(1, m.endTick - m.startTick);
+  return m.startSec + frac * (m.endSec - m.startSec);
+}
+
+export interface StanzaPlaybackPosition {
+  /** 0-based stanza occurrence (verse) index, or -1 during the introduction */
+  occurrence: number;
+  /** Equivalent tick inside the first (canonical) stanza */
+  stanzaTick: number;
+}
+
+/** Locates raw MIDI time within the repeating stanza structure. */
+export function locateStanzaPosition(
+  score: ParsedHymnScore,
+  rawSec: number,
+): StanzaPlaybackPosition | null {
+  const tick = rawSecToTick(score, rawSec);
+  if (tick === null) return null;
+  const measureIdx = Math.floor(tick / score.barTicks);
+  const [stanzaStart] = score.stanzaRange;
+  const starts = score.stanzaStarts;
+
+  if (measureIdx < starts[0]) {
+    return { occurrence: -1, stanzaTick: tick };
+  }
+  for (let k = starts.length - 1; k >= 0; k--) {
+    if (measureIdx >= starts[k]) {
+      if (measureIdx >= starts[k] + score.stanzaLength) return null;
+      const shift = (starts[k] - stanzaStart) * score.barTicks;
+      return { occurrence: k, stanzaTick: tick - shift };
+    }
+  }
+  return null;
 }
 
 /**

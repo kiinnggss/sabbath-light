@@ -4,8 +4,15 @@ import {
   decomposeDurationSteps,
   extractHymnScore,
   findActiveMeasureIndex,
+  locateStanzaPosition,
   normalizeKeySignature,
 } from '../midiScore';
+import {
+  alignLyricsToMelody,
+  collectMelodyOnsets,
+  findOnsetAtTick,
+  syllabify,
+} from '../lyricSync';
 
 function buildMultiStanzaHymnMidi(): Midi {
   const midi = new Midi();
@@ -124,5 +131,31 @@ describe('midiScore parser and quantization', () => {
     expect(findActiveMeasureIndex(score, v2MidSec, 'full')).toBe(14);
     // In 1-stanza mode, verse 2 wraps back onto the matching bar in verse 1
     expect(findActiveMeasureIndex(score, v2MidSec, 'stanza')).toBe(6);
+  });
+
+  it('syllabifies hymn words and aligns lyrics across melody onsets with live lookup', () => {
+    expect(syllabify('creation')).toEqual(['cre', 'a', 'tion']);
+    expect(syllabify('Almighty')).toEqual(['Al', 'might', 'y']);
+    expect(syllabify("o'er")).toEqual(["o'er"]);
+    expect(syllabify('Alleluia')).toEqual(['Al', 'le', 'lu', 'ia']);
+
+    const midi = buildMultiStanzaHymnMidi();
+    const score = extractHymnScore(midi, 96);
+    const onsets = collectMelodyOnsets(score);
+    expect(onsets).toHaveLength(24); // 8 bars * 3 quarter notes
+
+    const alignment = alignLyricsToMelody(onsets, [
+      'Praise to the Lord the King of all',
+      'O my soul praise Him now and ever',
+    ]);
+    expect(alignment.lines).toHaveLength(2);
+    expect(alignment.tokens.filter(Boolean).length).toBeGreaterThanOrEqual(14);
+
+    // Verse 2 maps back onto stanza 1 ticks with occurrence = 1
+    const v2Bar2 = score.measures[14];
+    const pos = locateStanzaPosition(score, (v2Bar2.startSec + v2Bar2.endSec) / 2);
+    expect(pos?.occurrence).toBe(1);
+    const onsetIdx = pos ? findOnsetAtTick(onsets, pos.stanzaTick) : null;
+    expect(onsetIdx).not.toBeNull();
   });
 });
