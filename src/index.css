@@ -309,3 +309,18 @@ input[type="range"].tactile-range::-moz-range-thumb {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* VexFlow sheet music adapts to active Light/Sepia/Dark theme ink */
+.sheet-music-svg svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.sheet-music-svg svg [stroke]:not([stroke="none"]) {
+  stroke: currentColor;
+}
+
+.sheet-music-svg svg [fill]:not([fill="none"]) {
+  fill: currentColor;
+}

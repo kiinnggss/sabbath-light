@@ -6,6 +6,7 @@ import {
   CaretRight,
   MusicNotes,
   NotePencil,
+  PianoKeys,
   Star,
 } from '@phosphor-icons/react';
 import type { HymnEntry } from '../../data/hymnalTypes';
@@ -13,6 +14,7 @@ import type { StudyNote } from '../../lib/offlineDb';
 import { TunePlayerBar } from '../audio/TunePlayerBar';
 import { DotMatrixBadge } from './DotMatrixBadge';
 import { HymnStoryView } from './HymnStoryView';
+import { SheetMusicView } from './SheetMusicView';
 
 interface HymnReaderProps {
   hymn: HymnEntry;
@@ -33,7 +35,7 @@ export function HymnReader({
   onBack,
   onNavigateNumber,
 }: HymnReaderProps) {
-  const [viewMode, setViewMode] = useState<'lyrics' | 'story'>('lyrics');
+  const [viewMode, setViewMode] = useState<'lyrics' | 'sheet' | 'story'>('lyrics');
 
   return (
     <div className="pb-56">
@@ -121,11 +123,11 @@ export function HymnReader({
           </div>
         </div>
 
-        {/* 2-Pill Switcher: Lyrics | Story & Author */}
+        {/* 3-Pill Switcher: Lyrics | Sheet Music | Story */}
         <div
           role="tablist"
           aria-label="Hymn view"
-          className="mt-5 grid grid-cols-2 gap-1.5 rounded-xl bg-[var(--bg-recessed)] p-1"
+          className="mt-5 grid grid-cols-3 gap-1.5 rounded-xl bg-[var(--bg-recessed)] p-1"
         >
           <button
             type="button"
@@ -144,6 +146,20 @@ export function HymnReader({
           <button
             type="button"
             role="tab"
+            aria-selected={viewMode === 'sheet'}
+            onClick={() => setViewMode('sheet')}
+            className={`tactile-btn flex h-10 items-center justify-center gap-1.5 rounded-lg text-xs font-bold ${
+              viewMode === 'sheet'
+                ? 'bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-sm'
+                : 'text-[var(--ink-secondary)] hover:text-[var(--ink-primary)]'
+            }`}
+          >
+            <PianoKeys size={16} weight={viewMode === 'sheet' ? 'fill' : 'regular'} />
+            <span>Sheet</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={viewMode === 'story'}
             onClick={() => setViewMode('story')}
             className={`tactile-btn flex h-10 items-center justify-center gap-1.5 rounded-lg text-xs font-bold ${
@@ -153,7 +169,7 @@ export function HymnReader({
             }`}
           >
             <BookOpenText size={16} weight={viewMode === 'story' ? 'fill' : 'regular'} />
-            <span>Story &amp; Author</span>
+            <span>Story</span>
           </button>
         </div>
       </header>
@@ -210,6 +226,8 @@ export function HymnReader({
               </section>
             ))}
           </div>
+        ) : viewMode === 'sheet' ? (
+          <SheetMusicView hymn={hymn} />
         ) : (
           <HymnStoryView hymn={hymn} />
         )}

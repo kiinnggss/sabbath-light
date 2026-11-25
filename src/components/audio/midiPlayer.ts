@@ -81,7 +81,58 @@ const SILENT_WAV_DATA_URL =
   'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
 
 const MAX_RENDERED_CACHE = 3;
+const MAX_PARSED_MIDI_CACHE = 6;
 const UI_PROGRESS_INTERVAL_MS = 100;
+
+const parsedMidiCache = new Map<number, Promise<Midi | null>>();
+
+function resolveMidiBaseUrl(): string {
+  const base = import.meta.env.BASE_URL || '/';
+  return base.endsWith('/') ? base : `${base}/`;
+}
+
+/**
+ * Fetches and parses a bundled hymnal MIDI file, caching the result so
+ * audio rendering and sheet music rendering share a single network fetch.
+ */
+export function loadParsedMidi(hymnNumber: number): Promise<Midi | null> {
+  const existing = parsedMidiCache.get(hymnNumber);
+  if (existing) {
+    // Refresh LRU order
+    parsedMidiCache.delete(hymnNumber);
+    parsedMidiCache.set(hymnNumber, existing);
+    return existing;
+  }
+
+  const promise = (async (): Promise<Midi | null> => {
+    const midiPath = `${resolveMidiBaseUrl()}midi/${formatMidiFilename(hymnNumber)}`;
+    const midiUrl =
+      typeof window !== 'undefined'
+        ? new URL(midiPath, window.location.origin).href
+        : midiPath;
+
+    const res = await fetch(midiUrl);
+    if (!res.ok) return null;
+
+    const buf = await res.arrayBuffer();
+    if (!isValidMidiBuffer(buf)) return null;
+
+    return new Midi(buf);
+  })().catch((err) => {
+    // Do not poison the cache on transient network errors
+    parsedMidiCache.delete(hymnNumber);
+    throw err;
+  });
+
+  parsedMidiCache.set(hymnNumber, promise);
+  while (parsedMidiCache.size > MAX_PARSED_MIDI_CACHE) {
+    const oldestKey = parsedMidiCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    parsedMidiCache.delete(oldestKey);
+  }
+
+  return promise;
+}
 
 export function formatMidiFilename(hymnNumber: number): string {
   return `${String(Math.max(0, Math.floor(hymnNumber))).padStart(3, '0')}.mid`;
@@ -833,32 +884,16 @@ class PreRenderedMidiPlayerEngine {
     this.attachedBlobUrl = '';
     this.emit();
 
-    const midiPath = `${this.getBaseUrl()}midi/${formatMidiFilename(hymnNumber)}`;
-    const midiUrl =
-      typeof window !== 'undefined'
-        ? new URL(midiPath, window.location.origin).href
-        : midiPath;
-
     try {
-      const res = await fetch(midiUrl);
+      const parsed = await loadParsedMidi(hymnNumber);
       if (token !== this.loadSeq) return;
 
-      if (!res.ok) {
+      if (!parsed) {
         this.status = 'unavailable';
         this.emit();
         return;
       }
 
-      const buf = await res.arrayBuffer();
-      if (token !== this.loadSeq) return;
-
-      if (!isValidMidiBuffer(buf)) {
-        this.status = 'unavailable';
-        this.emit();
-        return;
-      }
-
-      const parsed = new Midi(buf);
       const { notes, durationSec, baseBpm } = extractPlayableMidiData(parsed, fallbackBpm);
 
       if (notes.length === 0) {
@@ -1001,6 +1036,17 @@ class PreRenderedMidiPlayerEngine {
     const clamped = Math.max(0, Math.min(0.995, progress01));
     try {
       this.audioEl.currentTime = clamped * this.midiDurationSec;
+    } catch {
+      // Ignore
+    }
+    this.emit();
+  }
+
+  seekToRawSeconds(rawMidiSec: number): void {
+    if (this.status !== 'ready' || !this.audioEl || this.midiDurationSec <= 0) return;
+    const clamped = Math.max(0, Math.min(this.midiDurationSec * 0.995, rawMidiSec));
+    try {
+      this.audioEl.currentTime = clamped;
     } catch {
       // Ignore
     }
