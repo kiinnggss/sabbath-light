@@ -443,17 +443,47 @@ export async function mixNotesToStereoPcm(
   const availableMidis = Array.from(sampleBank.keys()).sort((a, b) => a - b);
   if (availableMidis.length === 0) return null;
 
-  const tailSec = voice === 'organ' ? 0.45 : 0.65;
+  const tailSec = voice === 'organ' ? 0.45 : 0.55;
   const totalSec = Math.min(360, Math.max(1.5, durationSec + tailSec));
   const totalFrames = Math.ceil(totalSec * sampleRate);
   const outL = new Float32Array(totalFrames);
   const outR = new Float32Array(totalFrames);
 
-  const attackSec = voice === 'organ' ? 0.012 : 0.005;
-  const releaseSec = voice === 'organ' ? 0.22 : 0.34;
+  const attackSec = voice === 'organ' ? 0.012 : 0.0025;
+  const releaseSec = voice === 'organ' ? 0.22 : 0.22;
   const attackFrames = Math.max(1, Math.round(attackSec * sampleRate));
   const releaseFrames = Math.max(1, Math.round(releaseSec * sampleRate));
+  const brightFrames = Math.round(0.035 * sampleRate);
   const minStartFrame = Math.round(0.005 * sampleRate);
+
+  // Classify each note's musical role (melody / harmony / bass) within 40ms chord windows
+  // so the soprano melody sings clearly above the accompaniment instead of being buried.
+  const voiceRoles: Array<'melody' | 'harmony' | 'bass'> = new Array(notes.length).fill('harmony');
+  let clusterStart = 0;
+  while (clusterStart < notes.length) {
+    const t0 = notes[clusterStart].time;
+    let clusterEnd = clusterStart + 1;
+    while (clusterEnd < notes.length && notes[clusterEnd].time - t0 <= 0.04) {
+      clusterEnd++;
+    }
+    let maxMidi = -Infinity;
+    let minMidi = Infinity;
+    for (let k = clusterStart; k < clusterEnd; k++) {
+      if (notes[k].midi > maxMidi) maxMidi = notes[k].midi;
+      if (notes[k].midi < minMidi) minMidi = notes[k].midi;
+    }
+    const multiPitch = maxMidi > minMidi;
+    for (let k = clusterStart; k < clusterEnd; k++) {
+      if (notes[k].midi === maxMidi && maxMidi >= 57) {
+        voiceRoles[k] = 'melody';
+      } else if (multiPitch && notes[k].midi === minMidi) {
+        voiceRoles[k] = 'bass';
+      } else {
+        voiceRoles[k] = 'harmony';
+      }
+    }
+    clusterStart = clusterEnd;
+  }
 
   for (let nIdx = 0; nIdx < notes.length; nIdx++) {
     if (nIdx > 0 && nIdx % 60 === 0) {
@@ -462,6 +492,7 @@ export async function mixNotesToStereoPcm(
     }
 
     const note = notes[nIdx];
+    const role = voiceRoles[nIdx];
     const startFrame = Math.max(minStartFrame, Math.round(note.time * sampleRate));
     if (startFrame >= totalFrames - 10) continue;
 
@@ -478,14 +509,35 @@ export async function mixNotesToStereoPcm(
 
     const rel = Math.min(releaseFrames, Math.floor(span * 0.45));
     const relStart = span - rel;
-    const gain =
+
+    const baseGain =
       (voice === 'organ'
         ? 0.22 + 0.3 * note.velocity
         : 0.22 + 0.48 * note.velocity) * 0.65;
+    const roleScale =
+      role === 'melody'
+        ? voice === 'organ'
+          ? 1.35
+          : 1.55
+        : role === 'bass'
+          ? voice === 'organ'
+            ? 0.86
+            : 0.78
+          : voice === 'organ'
+            ? 0.72
+            : 0.62;
+    const gain = baseGain * roleScale;
+
+    // Subtle acoustic grand-piano stereo width (bass slightly left, melody slightly right)
+    const panL = role === 'bass' ? 1.07 : role === 'melody' ? 0.94 : 0.98;
+    const panR = role === 'bass' ? 0.91 : role === 'melody' ? 1.06 : 0.98;
+    const addHammerCrisp = voice === 'piano' && role === 'melody';
 
     const sL = smp.left;
     const sR = smp.right;
     let pos = 0;
+    let prevL = 0;
+    let prevR = 0;
 
     for (let i = 0; i < span; i++) {
       const idx = Math.floor(pos);
@@ -497,10 +549,22 @@ export async function mixNotesToStereoPcm(
         env = gain * ((span - i) / rel);
       }
 
-      const lVal = sL[idx] + (sL[idx + 1] - sL[idx]) * frac;
-      const rVal = sR[idx] + (sR[idx + 1] - sR[idx]) * frac;
-      outL[startFrame + i] += lVal * env;
-      outR[startFrame + i] += rVal * env;
+      let lVal = sL[idx] + (sL[idx + 1] - sL[idx]) * frac;
+      let rVal = sR[idx] + (sR[idx + 1] - sR[idx]) * frac;
+
+      // Subtle attack presence boost on piano melody notes so the tune stays sharp and clear
+      if (addHammerCrisp && i < brightFrames) {
+        const brightMix = 0.22 * (1 - i / brightFrames);
+        const dL = lVal - prevL;
+        const dR = rVal - prevR;
+        prevL = lVal;
+        prevR = rVal;
+        lVal += dL * brightMix;
+        rVal += dR * brightMix;
+      }
+
+      outL[startFrame + i] += lVal * env * panL;
+      outR[startFrame + i] += rVal * env * panR;
       pos += rate;
     }
   }
@@ -830,6 +894,12 @@ class PreRenderedMidiPlayerEngine {
     } catch {
       // Ignore Media Session errors on unsupported browsers
     }
+  }
+
+  getExactRawTimeSec(): number {
+    const audio = this.audioEl;
+    if (!audio || !this.attachedBlobUrl || this.status !== 'ready') return 0;
+    return Math.max(0, Math.min(this.midiDurationSec, audio.currentTime || 0));
   }
 
   getState(): MidiPlaybackState {

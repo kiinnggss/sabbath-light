@@ -157,14 +157,89 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
     return map;
   }, [melodyOnsets]);
 
-  // Live playback position in the repeating stanza structure
-  const livePos = useMemo(() => {
-    if (!score || playback.hymnNumber !== hymn.number) return null;
-    if (!playback.isPlaying && playback.currentTimeSec <= 0.01) return null;
-    const rawMidiSec = playback.currentTimeSec * playback.speed + score.audioLeadTrimSec;
-    return locateStanzaPosition(score, rawMidiSec);
+  // 60fps direct RAM audio-clock sync (reads HTMLAudioElement.currentTime with zero 100ms timer lag)
+  const [liveSync, setLiveSync] = useState<{
+    occurrence: number;
+    onsetIndex: number | null;
+    introRemainingSec: number;
+    introProgress: number;
+  } | null>(null);
+
+  const firstVerseStartSec = useMemo(() => {
+    if (!score || score.stanzaStarts.length === 0) return 0;
+    const m = score.measures[score.stanzaStarts[0]];
+    return m ? Math.max(0, m.startSec - score.audioLeadTrimSec) : 0;
+  }, [score]);
+
+  useEffect(() => {
+    if (!score || playback.hymnNumber !== hymn.number) {
+      setLiveSync(null);
+      return;
+    }
+
+    const computeSync = () => {
+      const exactRaw = midiPlayer.getExactRawTimeSec();
+      if (!playback.isPlaying && exactRaw <= 0.01) {
+        setLiveSync((prev) => (prev === null ? prev : null));
+        return;
+      }
+
+      // +45ms lookahead compensates for audio output buffer latency so highlights land right on the beat
+      const rawMidiSec = exactRaw + score.audioLeadTrimSec + 0.045;
+      const pos = locateStanzaPosition(score, rawMidiSec);
+      if (!pos) {
+        setLiveSync((prev) => (prev === null ? prev : null));
+        return;
+      }
+
+      if (pos.occurrence === -1) {
+        const remaining = Math.max(0, Math.ceil((firstVerseStartSec - exactRaw) / Math.max(0.5, playback.speed)));
+        const progress = firstVerseStartSec > 0.2 ? Math.min(1, Math.max(0, exactRaw / firstVerseStartSec)) : 1;
+        const roundedProgress = Math.round(progress * 50) / 50;
+        setLiveSync((prev) =>
+          prev &&
+          prev.occurrence === -1 &&
+          prev.onsetIndex === null &&
+          prev.introRemainingSec === remaining &&
+          prev.introProgress === roundedProgress
+            ? prev
+            : {
+                occurrence: -1,
+                onsetIndex: null,
+                introRemainingSec: remaining,
+                introProgress: roundedProgress,
+              },
+        );
+        return;
+      }
+
+      const onsetIdx = findOnsetAtTick(melodyOnsets, pos.stanzaTick);
+      setLiveSync((prev) =>
+        prev && prev.occurrence === pos.occurrence && prev.onsetIndex === onsetIdx
+          ? prev
+          : {
+              occurrence: pos.occurrence,
+              onsetIndex: onsetIdx,
+              introRemainingSec: 0,
+              introProgress: 1,
+            },
+      );
+    };
+
+    computeSync();
+    if (!playback.isPlaying || typeof window === 'undefined') return;
+
+    let rafId = 0;
+    const tick = () => {
+      computeSync();
+      rafId = window.requestAnimationFrame(tick);
+    };
+    rafId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(rafId);
   }, [
     score,
+    melodyOnsets,
+    firstVerseStartSec,
     playback.hymnNumber,
     playback.isPlaying,
     playback.currentTimeSec,
@@ -172,15 +247,15 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
     hymn.number,
   ]);
 
-  const isPlayingIntro = livePos !== null && livePos.occurrence === -1;
+  const isPlayingIntro = liveSync !== null && liveSync.occurrence === -1;
 
   // Automatically follow the verse being sung during playback, or use user's manual selection
   const activeVerseIdx = useMemo(() => {
-    if (livePos && livePos.occurrence >= 0) {
-      return Math.min(verseCount - 1, livePos.occurrence);
+    if (liveSync && liveSync.occurrence >= 0) {
+      return Math.min(verseCount - 1, liveSync.occurrence);
     }
     return Math.min(verseCount - 1, selectedVerse);
-  }, [livePos, verseCount, selectedVerse]);
+  }, [liveSync, verseCount, selectedVerse]);
 
   const activeStanzaLyrics = useMemo(
     () => getStanzaLyrics(hymn.verses, activeVerseIdx),
@@ -192,10 +267,7 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
     [melodyOnsets, activeStanzaLyrics.lines],
   );
 
-  const activeOnsetIdx = useMemo(() => {
-    if (!livePos || livePos.occurrence < 0) return null;
-    return findOnsetAtTick(melodyOnsets, livePos.stanzaTick);
-  }, [livePos, melodyOnsets]);
+  const activeOnsetIdx = liveSync && liveSync.occurrence >= 0 ? liveSync.onsetIndex : null;
 
   const activeWordPos =
     activeOnsetIdx !== null ? lyricAlignment.onsetWord[activeOnsetIdx] ?? null : null;
@@ -487,12 +559,22 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, [playback.isPlaying, activeOnsetIdx, onsetOverlays]);
 
-  const seekToStanzaTick = (stanzaTick: number) => {
+  const seekToStanzaTick = (stanzaTick: number, targetVerseIdx = activeVerseIdx) => {
     if (!score || playback.hymnNumber !== hymn.number || playback.status !== 'ready') return;
-    const occurrence = Math.min(score.stanzaStarts.length - 1, activeVerseIdx);
+    const occurrence = Math.min(score.stanzaStarts.length - 1, Math.max(0, targetVerseIdx));
     const shift = (score.stanzaStarts[occurrence] - score.stanzaRange[0]) * score.barTicks;
     const targetSec = Math.max(0, tickToRawSec(score, stanzaTick + shift) - score.audioLeadTrimSec);
     midiPlayer.seekToRawSeconds(targetSec);
+  };
+
+  const handleSelectVerse = (verseIdx: number) => {
+    setSelectedVerse(verseIdx);
+    if (score && playback.hymnNumber === hymn.number && playback.status === 'ready') {
+      const startMeasure = score.measures[score.stanzaRange[0]];
+      if (startMeasure) {
+        seekToStanzaTick(startMeasure.startTick, verseIdx);
+      }
+    }
   };
 
   if (loadState === 'unavailable') {
@@ -591,9 +673,22 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
       {currentLine && (
         <div className="sticky top-[57px] z-20 -mx-1 mb-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-recessed)]/95 px-3.5 py-2.5 backdrop-blur-sm">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent-primary)]">
-              {isPlayingIntro ? 'Introduction' : activeStanzaLyrics.label}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent-primary)]">
+                {isPlayingIntro
+                  ? `Introduction · Verse 1 in ${liveSync?.introRemainingSec ?? 0}s`
+                  : activeStanzaLyrics.label}
+              </span>
+              {isPlayingIntro && playback.status === 'ready' && (
+                <button
+                  type="button"
+                  onClick={() => handleSelectVerse(0)}
+                  className="rounded-md bg-[var(--accent-primary)] px-2 py-0.5 text-[10px] font-bold text-[var(--ink-on-accent)] transition-opacity hover:opacity-90"
+                >
+                  Skip Intro
+                </button>
+              )}
+            </div>
 
             {verseCount > 1 && (
               <div className="flex items-center gap-1" aria-label="Select verse lyrics">
@@ -601,7 +696,7 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
                   <button
                     key={idx}
                     type="button"
-                    onClick={() => setSelectedVerse(idx)}
+                    onClick={() => handleSelectVerse(idx)}
                     className={`h-5 min-w-[22px] rounded-md px-1.5 text-[10px] font-bold transition-colors ${
                       activeVerseIdx === idx && !isPlayingIntro
                         ? 'bg-[var(--accent-primary)] text-[var(--ink-on-accent)]'
@@ -614,6 +709,15 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
               </div>
             )}
           </div>
+
+          {isPlayingIntro && (
+            <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[var(--bg-surface)]">
+              <div
+                className="h-full rounded-full bg-[var(--accent-primary)] transition-[width] duration-150"
+                style={{ width: `${Math.round((liveSync?.introProgress ?? 0) * 100)}%` }}
+              />
+            </div>
+          )}
 
           <p className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-sm font-medium leading-snug text-[var(--ink-primary)]">
             {currentLine.words.map((word, wIdx) => {
