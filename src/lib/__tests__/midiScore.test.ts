@@ -103,12 +103,20 @@ describe('midiScore parser and quantization', () => {
     expect(score.timeSignatureLabel).toBe('3/4');
     expect(score.measures).toHaveLength(20);
 
-    // Every measure in 3/4 must sum to 12 sixteenth-note steps on both staves
+    // Every measure in 3/4 must sum to 12 sixteenth-note steps on all staves and SATB voices
     for (const measure of score.measures) {
       const trebleSum = measure.treble.reduce((acc, e) => acc + e.durationSteps, 0);
       const bassSum = measure.bass.reduce((acc, e) => acc + e.durationSteps, 0);
+      const sopSum = measure.soprano.reduce((acc, e) => acc + e.durationSteps, 0);
+      const altSum = measure.alto.reduce((acc, e) => acc + e.durationSteps, 0);
+      const tenSum = measure.tenor.reduce((acc, e) => acc + e.durationSteps, 0);
+      const basSum = measure.bassVoice.reduce((acc, e) => acc + e.durationSteps, 0);
       expect(trebleSum).toBe(12);
       expect(bassSum).toBe(12);
+      expect(sopSum).toBe(12);
+      expect(altSum).toBe(12);
+      expect(tenSum).toBe(12);
+      expect(basSum).toBe(12);
     }
 
     // Detects the 8-bar stanza starting at bar 4 (after the 4-bar intro)
@@ -157,5 +165,28 @@ describe('midiScore parser and quantization', () => {
     expect(pos?.occurrence).toBe(1);
     const onsetIdx = pos ? findOnsetAtTick(onsets, pos.stanzaTick) : null;
     expect(onsetIdx).not.toBeNull();
+  });
+
+  it('splits notes held across a barline with cross-barline tie flags', () => {
+    const midi = new Midi();
+    midi.header.setTempo(96);
+    midi.header.timeSignatures.push({ ticks: 0, timeSignature: [4, 4], measures: 0 });
+    const ppq = midi.header.ppq;
+    const sop = midi.addTrack();
+    sop.channel = 0;
+    // Half note starting on beat 4 (tick 3*ppq) held across barline into beat 1 of bar 2
+    sop.addNote({ midi: 69, ticks: ppq * 3, durationTicks: ppq * 2 });
+    const bass = midi.addTrack();
+    bass.channel = 1;
+    bass.addNote({ midi: 45, ticks: 0, durationTicks: ppq * 4 });
+
+    const score = extractHymnScore(midi, 96);
+    expect(score.measures.length).toBeGreaterThanOrEqual(2);
+    const bar1Last = score.measures[0].soprano[score.measures[0].soprano.length - 1];
+    const bar2First = score.measures[1].soprano[0];
+    expect(bar1Last.tieToNextBar).toBe(true);
+    expect(bar2First.tieFromPreviousBar).toBe(true);
+    expect(bar1Last.midis).toEqual([69]);
+    expect(bar2First.midis).toEqual([69]);
   });
 });

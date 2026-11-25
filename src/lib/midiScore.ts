@@ -13,6 +13,10 @@ export interface ScoreNoteEvent {
   isRest: boolean;
   /** True when this chunk continues (is tied from) the previous chunk of the same note */
   tieFromPrevious: boolean;
+  /** True when this note continues across a barline from the previous measure */
+  tieFromPreviousBar?: boolean;
+  /** True when this note ties forward across the barline into the next measure */
+  tieToNextBar?: boolean;
   /** VexFlow key strings sorted low to high, e.g. ['f/4', 'a/4', 'c/5'] */
   keys: string[];
   /** Raw MIDI note numbers sorted low to high */
@@ -32,8 +36,13 @@ export interface ScoreMeasure {
   endSec: number;
   treble: ScoreNoteEvent[];
   bass: ScoreNoteEvent[];
-  /** Soprano melody line only (single notes), used for the lyric lead sheet */
+  /** Soprano melody line only (single notes), used for lyric alignment and Melody Only mode */
   melody: ScoreNoteEvent[];
+  /** Independent 4-part SATB voices for full hymnal grand-staff engraving */
+  soprano: ScoreNoteEvent[];
+  alto: ScoreNoteEvent[];
+  tenor: ScoreNoteEvent[];
+  bassVoice: ScoreNoteEvent[];
 }
 
 export interface ParsedHymnScore {
@@ -231,6 +240,8 @@ interface RawStaffNote {
   ticks: number;
   durationTicks: number;
   midi: number;
+  fromPrevBar?: boolean;
+  toNextBar?: boolean;
 }
 
 function buildStaffEventsForMeasure(
@@ -281,20 +292,30 @@ function buildStaffEventsForMeasure(
   }
 
   // Group notes starting on the same quantized 16th-note step into chords
-  const stepMap = new Map<number, { midis: Set<number>; maxDurSteps: number }>();
+  const stepMap = new Map<
+    number,
+    { midis: Set<number>; maxDurSteps: number; fromPrevBar: boolean; toNextBar: boolean }
+  >();
   for (const n of rawNotes) {
     const relSteps = Math.round((n.ticks - measureStartTick) / stepTicks);
     const step = Math.max(0, Math.min(measureSixteenths - 1, relSteps));
     const durSteps = Math.max(1, Math.round(n.durationTicks / stepTicks));
     let bucket = stepMap.get(step);
     if (!bucket) {
-      bucket = { midis: new Set<number>(), maxDurSteps: durSteps };
+      bucket = {
+        midis: new Set<number>(),
+        maxDurSteps: durSteps,
+        fromPrevBar: Boolean(n.fromPrevBar),
+        toNextBar: Boolean(n.toNextBar),
+      };
       stepMap.set(step, bucket);
     }
     bucket.midis.add(Math.round(n.midi));
     if (durSteps > bucket.maxDurSteps) {
       bucket.maxDurSteps = durSteps;
     }
+    if (n.fromPrevBar) bucket.fromPrevBar = true;
+    if (n.toNextBar) bucket.toNextBar = true;
   }
 
   const onsetSteps = [...stepMap.keys()].sort((a, b) => a - b);
@@ -357,6 +378,8 @@ function buildStaffEventsForMeasure(
         dots: chunk.dots,
         isRest: false,
         tieFromPrevious: cIdx > 0,
+        tieFromPreviousBar: cIdx === 0 && bucket.fromPrevBar ? true : undefined,
+        tieToNextBar: cIdx === chunks.length - 1 && bucket.toNextBar ? true : undefined,
         keys: spelled.map((s) => s.vexKey),
         midis: sortedMidis,
         accidentals,
@@ -560,6 +583,24 @@ export function extractHymnScore(
 
   const measures: ScoreMeasure[] = [];
   const melodyByBar = extractSkylineMelodyByBar(trebleRaw, stepTicks, barTicks, measureCount);
+
+  // Split treble into Soprano + Alto, and bass into Tenor + Bass for 4-part SATB engraving
+  const { upper: sopranoRaw, lower: altoRaw } = splitStaffIntoTwoVoices(
+    ch0Tracks.length > 0 && ch1Tracks.length > 0 ? ch0Tracks : [],
+    trebleRaw,
+    stepTicks,
+  );
+  const { upper: tenorRaw, lower: bassVoiceRaw } = splitStaffIntoTwoVoices(
+    ch0Tracks.length > 0 && ch1Tracks.length > 0 ? ch1Tracks : [],
+    bassRaw,
+    stepTicks,
+  );
+
+  const sopranoByBar = bucketNotesWithCrossBarTies(sopranoRaw, stepTicks, barTicks, measureCount);
+  const altoByBar = bucketNotesWithCrossBarTies(altoRaw, stepTicks, barTicks, measureCount);
+  const tenorByBar = bucketNotesWithCrossBarTies(tenorRaw, stepTicks, barTicks, measureCount);
+  const bassVoiceByBar = bucketNotesWithCrossBarTies(bassVoiceRaw, stepTicks, barTicks, measureCount);
+
   for (let i = 0; i < measureCount; i++) {
     const startTick = i * barTicks;
     const endTick = (i + 1) * barTicks;
@@ -597,6 +638,38 @@ export function extractHymnScore(
         'treble',
         keySignature,
       ),
+      soprano: buildStaffEventsForMeasure(
+        sopranoByBar[i],
+        startTick,
+        stepTicks,
+        measureSixteenths,
+        'treble',
+        keySignature,
+      ),
+      alto: buildStaffEventsForMeasure(
+        altoByBar[i],
+        startTick,
+        stepTicks,
+        measureSixteenths,
+        'treble',
+        keySignature,
+      ),
+      tenor: buildStaffEventsForMeasure(
+        tenorByBar[i],
+        startTick,
+        stepTicks,
+        measureSixteenths,
+        'bass',
+        keySignature,
+      ),
+      bassVoice: buildStaffEventsForMeasure(
+        bassVoiceByBar[i],
+        startTick,
+        stepTicks,
+        measureSixteenths,
+        'bass',
+        keySignature,
+      ),
     });
   }
 
@@ -604,7 +677,9 @@ export function extractHymnScore(
   while (
     measures.length > 1 &&
     measures[measures.length - 1].treble.every((e) => e.isRest) &&
-    measures[measures.length - 1].bass.every((e) => e.isRest)
+    measures[measures.length - 1].bass.every((e) => e.isRest) &&
+    measures[measures.length - 1].soprano.every((e) => e.isRest) &&
+    measures[measures.length - 1].bassVoice.every((e) => e.isRest)
   ) {
     measures.pop();
   }
@@ -648,6 +723,120 @@ export function extractHymnScore(
     stanzaStarts,
     stanzaLength,
   };
+}
+
+/**
+ * Splits a staff's MIDI tracks into upper (Soprano/Tenor) and lower (Alto/Bass) voices.
+ * Uses separate MIDI tracks directly when present; otherwise splits simultaneous chords by pitch.
+ */
+function splitStaffIntoTwoVoices(
+  staffTracks: Midi['tracks'],
+  combinedRaw: RawStaffNote[],
+  stepTicks: number,
+): { upper: RawStaffNote[]; lower: RawStaffNote[] } {
+  if (staffTracks.length >= 2) {
+    const ranked = staffTracks
+      .map((t) => {
+        const avgMidi =
+          t.notes.reduce((sum, n) => sum + n.midi, 0) / Math.max(1, t.notes.length);
+        return { track: t, avgMidi };
+      })
+      .sort((a, b) => b.avgMidi - a.avgMidi);
+
+    const upper = ranked[0].track.notes.map((n) => ({
+      ticks: n.ticks,
+      durationTicks: n.durationTicks,
+      midi: n.midi,
+    }));
+    const lower: RawStaffNote[] = [];
+    for (let i = 1; i < ranked.length; i++) {
+      for (const n of ranked[i].track.notes) {
+        lower.push({ ticks: n.ticks, durationTicks: n.durationTicks, midi: n.midi });
+      }
+    }
+    return { upper, lower };
+  }
+
+  // Combined single-track staff: partition each quantized onset by pitch height
+  const byStep = new Map<number, RawStaffNote[]>();
+  for (const n of combinedRaw) {
+    const step = Math.round(n.ticks / stepTicks);
+    let list = byStep.get(step);
+    if (!list) {
+      list = [];
+      byStep.set(step, list);
+    }
+    list.push(n);
+  }
+
+  const upper: RawStaffNote[] = [];
+  const lower: RawStaffNote[] = [];
+  for (const step of [...byStep.keys()].sort((a, b) => a - b)) {
+    const group = byStep.get(step)!.sort((a, b) => a.midi - b.midi);
+    upper.push(group[group.length - 1]);
+    if (group.length === 1) {
+      // Unison note: duplicate into lower voice for classic hymnal double-stemmed unison
+      lower.push(group[0]);
+    } else {
+      for (let i = 0; i < group.length - 1; i++) {
+        lower.push(group[i]);
+      }
+    }
+  }
+  return { upper, lower };
+}
+
+/**
+ * Buckets a single voice's notes into measures, splitting notes held past a barline
+ * into tied continuations at the start of the following measure.
+ */
+function bucketNotesWithCrossBarTies(
+  rawNotes: RawStaffNote[],
+  stepTicks: number,
+  barTicks: number,
+  measureCount: number,
+): RawStaffNote[][] {
+  const byBar: RawStaffNote[][] = Array.from({ length: measureCount }, () => []);
+
+  for (const n of rawNotes) {
+    let curStart = n.ticks;
+    let remaining = n.durationTicks;
+    let barIdx = Math.max(
+      0,
+      Math.min(measureCount - 1, Math.floor((curStart + stepTicks * 0.45) / barTicks)),
+    );
+    let isContinuation = false;
+
+    while (remaining >= stepTicks * 0.6 && barIdx < measureCount) {
+      const barEnd = (barIdx + 1) * barTicks;
+      const spaceInBar = Math.max(stepTicks, barEnd - curStart);
+      const spill = remaining - spaceInBar;
+
+      if (spill >= stepTicks * 0.75 && barIdx + 1 < measureCount) {
+        byBar[barIdx].push({
+          ticks: curStart,
+          durationTicks: spaceInBar,
+          midi: n.midi,
+          fromPrevBar: isContinuation || undefined,
+          toNextBar: true,
+        });
+        curStart = barEnd;
+        remaining = spill;
+        barIdx++;
+        isContinuation = true;
+      } else {
+        byBar[barIdx].push({
+          ticks: curStart,
+          durationTicks: Math.min(remaining, spaceInBar),
+          midi: n.midi,
+          fromPrevBar: isContinuation || undefined,
+        });
+        break;
+      }
+    }
+  }
+
+  return byBar;
 }
 
 /**
