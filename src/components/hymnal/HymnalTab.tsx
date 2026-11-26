@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { HymnalEntry } from '../../data/hymnalTypes';
 import {
   extractJumpNumber,
@@ -7,6 +7,7 @@ import {
 } from '../../lib/fuzzySearch';
 import { makeHymnalNoteRef } from '../../lib/noteReferences';
 import type { StudyNote } from '../../lib/offlineDb';
+import type { HymnViewMode } from '../../lib/router';
 import type { NoteEditorRequest } from '../notes/NoteEditorSheet';
 import { HymnList } from './HymnList';
 import { HymnReader } from './HymnReader';
@@ -22,7 +23,10 @@ interface HymnalTabProps {
   onOpenScripture: (reference: string) => void;
   notesByRefId: Map<string, StudyNote>;
   onOpenNoteEditor: (req: NoteEditorRequest) => void;
-  jumpTarget: { number: number; seq: number } | null;
+  selectedNumber: number | null;
+  onSelectNumber: (number: number | null) => void;
+  viewMode: HymnViewMode;
+  onViewModeChange: (mode: HymnViewMode) => void;
 }
 
 export function HymnalTab({
@@ -34,17 +38,13 @@ export function HymnalTab({
   onOpenScripture,
   notesByRefId,
   onOpenNoteEditor,
-  jumpTarget,
+  selectedNumber,
+  onSelectNumber,
+  viewMode,
+  onViewModeChange,
 }: HymnalTabProps) {
   const [query, setQuery] = useState('');
   const [filterMode, setFilterMode] = useState<HymnalFilterMode>('all');
-  const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (jumpTarget) {
-      setSelectedNumber(jumpTarget.number);
-    }
-  }, [jumpTarget]);
 
   const selectedEntry = useMemo(
     () => (selectedNumber ? entries.find((e) => e.number === selectedNumber) || null : null),
@@ -108,12 +108,14 @@ export function HymnalTab({
       return (
         <HymnReader
           hymn={selectedEntry}
+          viewMode={viewMode}
+          onViewModeChange={onViewModeChange}
           isFavorite={favorites.includes(selectedEntry.number)}
           note={existingNote}
           onToggleFavorite={onToggleFavorite}
           onOpenNoteEditor={openNote}
-          onBack={() => setSelectedNumber(null)}
-          onNavigateNumber={(num) => setSelectedNumber(num)}
+          onBack={() => onSelectNumber(null)}
+          onNavigateNumber={(num) => onSelectNumber(num)}
         />
       );
     }
@@ -125,8 +127,8 @@ export function HymnalTab({
         note={existingNote}
         onToggleFavorite={onToggleFavorite}
         onOpenNoteEditor={openNote}
-        onBack={() => setSelectedNumber(null)}
-        onNavigateNumber={(num) => setSelectedNumber(num)}
+        onBack={() => onSelectNumber(null)}
+        onNavigateNumber={(num) => onSelectNumber(num)}
         onOpenScripture={onOpenScripture}
       />
     );
@@ -146,7 +148,7 @@ export function HymnalTab({
         entries={filteredEntries}
         jumpEntry={jumpEntry}
         favorites={favorites}
-        onSelectEntry={(num) => setSelectedNumber(num)}
+        onSelectEntry={(num) => onSelectNumber(num)}
         onToggleFavorite={onToggleFavorite}
       />
     </div>

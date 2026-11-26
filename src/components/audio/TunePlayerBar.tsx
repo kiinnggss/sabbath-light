@@ -16,6 +16,8 @@ import {
 
 interface TunePlayerBarProps {
   hymn: HymnEntry;
+  /** Docks the player directly above the safe area when BottomNav is hidden (e.g. Sheet mode) */
+  dockBottom?: boolean;
 }
 
 const SPEED_PRESETS = [0.75, 0.9, 1.0, 1.1, 1.25] as const;
@@ -27,7 +29,10 @@ function formatTime(sec: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
+export function TunePlayerBar({ hymn, dockBottom = false }: TunePlayerBarProps) {
+  const bottomPosClass = dockBottom
+    ? 'bottom-[calc(0.75rem+env(safe-area-inset-bottom))]'
+    : 'bottom-[calc(5.15rem+env(safe-area-inset-bottom))]';
   const [playback, setPlayback] = useState<MidiPlaybackState>(() => midiPlayer.getState());
   const [showTempoPanel, setShowTempoPanel] = useState(false);
   const [startingAudio, setStartingAudio] = useState(false);
@@ -63,7 +68,7 @@ export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
     return (
       <section
         aria-label="Hymn Tune Player"
-        className="fixed bottom-[calc(5.15rem+env(safe-area-inset-bottom))] left-1/2 z-30 w-[calc(100%-1.5rem)] max-w-2xl -translate-x-1/2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-3 shadow-[0_-4px_20px_rgba(19,6,3,0.10)]"
+        className={`fixed ${bottomPosClass} left-1/2 z-30 w-[calc(100%-1.5rem)] max-w-2xl -translate-x-1/2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-3 shadow-[0_-4px_20px_rgba(19,6,3,0.10)]`}
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -97,7 +102,7 @@ export function TunePlayerBar({ hymn }: TunePlayerBarProps) {
   return (
     <section
       aria-label="Hymn Tune Player"
-      className="fixed bottom-[calc(5.15rem+env(safe-area-inset-bottom))] left-1/2 z-30 w-[calc(100%-1.5rem)] max-w-2xl -translate-x-1/2 rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3.5 py-3 shadow-[0_-4px_20px_rgba(19,6,3,0.12)]"
+      className={`fixed ${bottomPosClass} left-1/2 z-30 w-[calc(100%-1.5rem)] max-w-2xl -translate-x-1/2 rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3.5 py-3 shadow-[0_-4px_20px_rgba(19,6,3,0.12)]`}
     >
       <div className="flex items-center gap-3">
         {/* Chunky Yoto-inspired Play/Pause */}

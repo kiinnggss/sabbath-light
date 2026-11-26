@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { midiPlayer } from './components/audio/midiPlayer';
 import { BibleTab } from './components/bible/BibleTab';
 import { ScripturePreviewSheet } from './components/bible/ScripturePreviewSheet';
@@ -16,6 +16,13 @@ import { useOfflineSync } from './hooks/useOfflineSync';
 import { usePreferences } from './hooks/usePreferences';
 import { parseNoteJumpTarget } from './lib/noteReferences';
 import type { StudyNote } from './lib/offlineDb';
+import {
+  buildRouteFromState,
+  formatHashRoute,
+  parseHashRoute,
+  type AppRoute,
+  type HymnViewMode,
+} from './lib/router';
 
 export function App() {
   const {
@@ -47,8 +54,67 @@ export function App() {
     verseAttr?: string;
   } | null>(null);
   const [noteEditorReq, setNoteEditorReq] = useState<NoteEditorRequest | null>(null);
-  const [hymnalJump, setHymnalJump] = useState<{ number: number; seq: number } | null>(null);
+  const [selectedHymnNumber, setSelectedHymnNumber] = useState<number | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const parsed = parseHashRoute(window.location.hash);
+    return parsed?.tab === 'hymnal' ? (parsed.hymnNumber ?? null) : null;
+  });
+  const [hymnViewMode, setHymnViewMode] = useState<HymnViewMode>(() => {
+    if (typeof window === 'undefined') return 'lyrics';
+    const parsed = parseHashRoute(window.location.hash);
+    return parsed?.tab === 'hymnal' && parsed.viewMode ? parsed.viewMode : 'lyrics';
+  });
   const [ssJump, setSsJump] = useState<SabbathSchoolJumpTarget | null>(null);
+
+  const applyingHashRef = useRef(false);
+
+  const applyRoute = useCallback(
+    (route: AppRoute) => {
+      applyingHashRef.current = true;
+      setActiveTab(route.tab);
+      if (route.tab === 'hymnal') {
+        setSelectedHymnNumber(route.hymnNumber ?? null);
+        setHymnViewMode(route.viewMode ?? 'lyrics');
+      } else if (route.tab === 'bible' && route.bookId && route.chapter) {
+        setBibleLocation({
+          bookId: route.bookId,
+          chapter: route.chapter,
+          verse: route.verse,
+        });
+      }
+      queueMicrotask(() => {
+        applyingHashRef.current = false;
+      });
+    },
+    [setActiveTab, setBibleLocation],
+  );
+
+  // Hydrate initial deep-link hash on mount and respond to browser Back/Forward
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const initial = parseHashRoute(window.location.hash);
+    if (initial) {
+      applyRoute(initial);
+    }
+
+    const onHashChange = () => {
+      const next = parseHashRoute(window.location.hash);
+      if (next) applyRoute(next);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, [applyRoute]);
+
+  // Keep URL hash synced with current navigation state so Back/Forward and sharing work
+  useEffect(() => {
+    if (typeof window === 'undefined' || applyingHashRef.current) return;
+    const nextHash = formatHashRoute(
+      buildRouteFromState(prefs.activeTab, selectedHymnNumber, hymnViewMode, prefs.bibleLocation),
+    );
+    if (window.location.hash !== nextHash) {
+      window.location.hash = nextHash;
+    }
+  }, [prefs.activeTab, selectedHymnNumber, hymnViewMode, prefs.bibleLocation]);
 
   // Cleanly stop MIDI playback whenever switching away from the Hymnal tab
   useEffect(() => {
@@ -72,7 +138,7 @@ export function App() {
     }
 
     if (target.type === 'hymnal') {
-      setHymnalJump({ number: target.number, seq: Date.now() });
+      setSelectedHymnNumber(target.number);
       setActiveTab('hymnal');
       return;
     }
@@ -89,6 +155,11 @@ export function App() {
     });
     setActiveTab('sabbath-school');
   };
+
+  const isSheetFocused =
+    prefs.activeTab === 'hymnal' &&
+    selectedHymnNumber !== null &&
+    hymnViewMode === 'sheet';
 
   return (
     <div className="min-h-dvh text-[var(--ink-primary)]">
@@ -138,7 +209,7 @@ export function App() {
         onRemoveBibleVersion={(v) => void offlineSync.removeBibleVersion(v)}
       />
 
-      <main className="mx-auto w-full max-w-4xl px-4 pb-28">
+      <main className={`mx-auto w-full max-w-4xl px-4 ${isSheetFocused ? 'pb-10' : 'pb-28'}`}>
         {prefs.activeTab === 'hymnal' && (
           <HymnalTab
             entries={hymnal.entries}
@@ -149,7 +220,10 @@ export function App() {
             onOpenScripture={(reference) => setScripturePreview({ reference })}
             notesByRefId={notesApi.notesByRefId}
             onOpenNoteEditor={setNoteEditorReq}
-            jumpTarget={hymnalJump}
+            selectedNumber={selectedHymnNumber}
+            onSelectNumber={setSelectedHymnNumber}
+            viewMode={hymnViewMode}
+            onViewModeChange={setHymnViewMode}
           />
         )}
 
@@ -191,7 +265,9 @@ export function App() {
         )}
       </main>
 
-      <BottomNav activeTab={prefs.activeTab} onSelectTab={setActiveTab} />
+      {!isSheetFocused && (
+        <BottomNav activeTab={prefs.activeTab} onSelectTab={setActiveTab} />
+      )}
 
       <ScripturePreviewSheet
         request={scripturePreview}

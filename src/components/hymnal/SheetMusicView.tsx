@@ -18,8 +18,13 @@ import {
   tickToRawSec,
   type ParsedHymnScore,
   type ScoreMeasure,
-  type ScoreNoteEvent,
 } from '../../lib/midiScore';
+import {
+  engraveScoreToSvg,
+  type MeasureHitBox,
+  type OnsetOverlay,
+  type SheetLayoutMode,
+} from '../../lib/vexflowRenderer';
 import {
   loadParsedMidi,
   midiPlayer,
@@ -28,48 +33,6 @@ import {
 
 interface SheetMusicViewProps {
   hymn: HymnEntry;
-}
-
-type SheetLayoutMode = 'hymnal' | 'melody';
-
-interface MeasureHitBox {
-  measureIndex: number;
-  displayNumber: number;
-  startSec: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-interface OnsetOverlay {
-  onsetIndex: number;
-  tick: number;
-  x: number;
-  topY: number;
-  staffHeight: number;
-  lyricY: number;
-}
-
-const HYMNAL_SCALE = 0.72;
-const MELODY_SCALE = 0.78;
-const HYMNAL_SYSTEM_HEIGHT = 268;
-const MELODY_SYSTEM_HEIGHT = 164;
-const TOP_PADDING = 6;
-const TREBLE_OFFSET_Y = 6;
-const HYMNAL_LYRIC_OFFSET_Y = 114;
-const HYMNAL_BASS_OFFSET_Y = 148;
-const HORIZONTAL_PADDING = 10;
-
-function chooseMeasuresPerSystem(logicalWidth: number, mode: SheetLayoutMode): number {
-  if (mode === 'hymnal') {
-    if (logicalWidth < 600) return 2;
-    if (logicalWidth < 920) return 3;
-    return 4;
-  }
-  if (logicalWidth < 540) return 2;
-  if (logicalWidth < 800) return 3;
-  return 4;
 }
 
 export function SheetMusicView({ hymn }: SheetMusicViewProps) {
@@ -87,10 +50,7 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
   const svgHostRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledSystemRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    const unsub = midiPlayer.subscribe(setPlayback);
-    return unsub;
-  }, []);
+  useEffect(() => midiPlayer.subscribe(setPlayback), []);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -125,13 +85,11 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
           setLoadState('unavailable');
           return;
         }
-        const extracted = extractHymnScore(parsed, hymn.defaultBpm || 96, hymn.key);
-        setScore(extracted);
+        setScore(extractHymnScore(parsed, hymn.defaultBpm || 96, hymn.key));
         setLoadState('ready');
       })
       .catch(() => {
-        if (cancelled) return;
-        setLoadState('error');
+        if (!cancelled) setLoadState('error');
       });
 
     return () => {
@@ -141,7 +99,6 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
 
   const verseCount = useMemo(() => countStanzaVerses(hymn.verses), [hymn.verses]);
 
-  // Engrave one canonical stanza so the grand staff stays compact and readable
   const visibleMeasures: ScoreMeasure[] = useMemo(() => {
     if (!score) return [];
     const [start, end] = score.stanzaRange;
@@ -153,21 +110,18 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
     [score],
   );
 
-  // Map (measureIndex, startStep) -> onsetIndex for positioning centered lyrics under Soprano notes
   const onsetByMeasureStep = useMemo(() => {
     const map = new Map<string, number>();
     if (!score) return map;
     melodyOnsets.forEach((onset, idx) => {
       const m = score.measures[onset.measureIndex];
       const ev = m?.melody[onset.eventIndex];
-      if (ev) {
-        map.set(`${onset.measureIndex}:${ev.startStep}`, idx);
-      }
+      if (ev) map.set(`${onset.measureIndex}:${ev.startStep}`, idx);
     });
     return map;
   }, [score, melodyOnsets]);
 
-  // 60fps direct RAM audio-clock sync (reads HTMLAudioElement.currentTime with zero 100ms timer lag)
+  // 60fps direct RAM audio-clock sync
   const [liveSync, setLiveSync] = useState<{
     occurrence: number;
     onsetIndex: number | null;
@@ -194,7 +148,6 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
         return;
       }
 
-      // +45ms lookahead compensates for audio output buffer latency so highlights land on the beat
       const rawMidiSec = exactRaw + score.audioLeadTrimSec + 0.045;
       const pos = locateStanzaPosition(score, rawMidiSec);
       if (!pos) {
@@ -281,331 +234,26 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
   );
 
   const activeOnsetIdx = liveSync && liveSync.occurrence >= 0 ? liveSync.onsetIndex : null;
-
   const activeWordPos =
     activeOnsetIdx !== null ? lyricAlignment.onsetWord[activeOnsetIdx] ?? null : null;
 
-  // Lazy-load VexFlow (Bravura) and engrave complete SATB grand-staff or Melody-only systems
   useEffect(() => {
     if (loadState !== 'ready' || !score || visibleMeasures.length === 0) return;
     const host = svgHostRef.current;
     if (!host) return;
 
     let cancelled = false;
-
-    void import('vexflow/bravura').then((vf) => {
-      if (cancelled || !svgHostRef.current) return;
-
-      const target = svgHostRef.current;
-      target.innerHTML = '';
-
-      const scale = layoutMode === 'hymnal' ? HYMNAL_SCALE : MELODY_SCALE;
-      const systemHeight = layoutMode === 'hymnal' ? HYMNAL_SYSTEM_HEIGHT : MELODY_SYSTEM_HEIGHT;
-      const logicalWidth = Math.round(containerWidth / scale);
-      const measuresPerSystem = chooseMeasuresPerSystem(logicalWidth, layoutMode);
-      const totalSystems = Math.ceil(visibleMeasures.length / measuresPerSystem);
-      const logicalHeight = TOP_PADDING * 2 + totalSystems * systemHeight;
-      const displayHeight = Math.round(logicalHeight * scale);
-      const usableWidth = Math.max(280, logicalWidth - HORIZONTAL_PADDING * 2);
-
-      const renderer = new vf.Renderer(target, vf.Renderer.Backends.SVG);
-      renderer.resize(containerWidth, displayHeight);
-      const context = renderer.getContext() as InstanceType<typeof vf.SVGContext>;
-      context.setViewBox(0, 0, logicalWidth, logicalHeight);
-      context.setFillStyle('currentColor');
-      context.setStrokeStyle('currentColor');
-
-      const [tsNum, tsDen] = score.timeSignature;
-      const nextBoxes: MeasureHitBox[] = [];
-      const nextOnsets: OnsetOverlay[] = [];
-
-      const buildVexVoiceNotes = (
-        events: ScoreNoteEvent[],
-        clef: 'treble' | 'bass',
-        stemDirection?: number,
-      ) => {
-        const notes = events.map((ev) => {
-          const duration = `${ev.baseDuration}${ev.dots > 0 ? 'd' : ''}${ev.isRest ? 'r' : ''}`;
-          const staveNote = new vf.StaveNote({
-            keys: ev.keys,
-            duration,
-            clef,
-            stemDirection: !ev.isRest ? stemDirection : undefined,
-            autoStem: !ev.isRest && stemDirection === undefined,
-          });
-
-          if (ev.dots > 0) {
-            vf.Dot.buildAndAttach([staveNote], { all: true });
-          }
-
-          if (!ev.isRest) {
-            ev.accidentals.forEach((acc, idx) => {
-              if (acc) {
-                staveNote.addModifier(new vf.Accidental(acc), idx);
-              }
-            });
-          }
-
-          return staveNote;
-        });
-
-        const ties: InstanceType<typeof vf.StaveTie>[] = [];
-        for (let i = 1; i < events.length; i++) {
-          if (events[i].tieFromPrevious && !events[i].isRest && !events[i - 1].isRest) {
-            ties.push(
-              new vf.StaveTie({
-                firstNote: notes[i - 1],
-                lastNote: notes[i],
-                firstIndexes: [0],
-                lastIndexes: [0],
-              }),
-            );
-          }
-        }
-
-        const beamable = notes.filter((_, i) => !events[i].isRest);
-        const beams =
-          beamable.length >= 2
-            ? vf.Beam.generateBeams(beamable, {
-                maintainStemDirections: stemDirection !== undefined,
-              })
-            : [];
-
-        return { notes, beams, ties };
-      };
-
-      const drawCrossBarTie = (
-        prevNote: InstanceType<typeof vf.StaveNote> | null,
-        currNote: InstanceType<typeof vf.StaveNote> | null,
-      ) => {
-        if (!prevNote && !currNote) return;
-        new vf.StaveTie({
-          firstNote: prevNote,
-          lastNote: currNote,
-          firstIndexes: [0],
-          lastIndexes: [0],
-        })
-          .setContext(context)
-          .draw();
-      };
-
-      for (let sysIdx = 0; sysIdx < totalSystems; sysIdx++) {
-        const sliceStart = sysIdx * measuresPerSystem;
-        const rowMeasures = visibleMeasures.slice(sliceStart, sliceStart + measuresPerSystem);
-        const systemY = TOP_PADDING + sysIdx * systemHeight;
-        const trebleY = systemY + TREBLE_OFFSET_Y;
-        const bassY = systemY + HYMNAL_BASS_OFFSET_Y;
-
-        const firstMeasureBonus = sysIdx === 0 ? 84 : 54;
-        const baseMeasureWidth = Math.floor(
-          (usableWidth - firstMeasureBonus) / measuresPerSystem,
-        );
-
-        let x = HORIZONTAL_PADDING;
-
-        // Track outgoing tied notes within this system so cross-barline ties connect smoothly
-        let prevSopranoTieOut: InstanceType<typeof vf.StaveNote> | null = null;
-        let prevAltoTieOut: InstanceType<typeof vf.StaveNote> | null = null;
-        let prevTenorTieOut: InstanceType<typeof vf.StaveNote> | null = null;
-        let prevBassTieOut: InstanceType<typeof vf.StaveNote> | null = null;
-
-        rowMeasures.forEach((measure, colIdx) => {
-          const isFirstInSystem = colIdx === 0;
-          const isLastInSystem = colIdx === rowMeasures.length - 1;
-          const isVeryLast = sliceStart + colIdx === visibleMeasures.length - 1;
-          const measureWidth = isFirstInSystem
-            ? baseMeasureWidth + firstMeasureBonus
-            : baseMeasureWidth;
-
-          const trebleStave = new vf.Stave(x, trebleY, measureWidth);
-          if (isFirstInSystem) {
-            trebleStave.addClef('treble').addKeySignature(score.keySignature);
-            if (sysIdx === 0) {
-              trebleStave.addTimeSignature(score.timeSignatureLabel);
-            }
-            trebleStave.setMeasure(sliceStart + colIdx + 1);
-          }
-          if (isVeryLast) {
-            trebleStave.setEndBarType(vf.Barline.type.END);
-          }
-          trebleStave.setContext(context).draw();
-
-          if (layoutMode === 'melody') {
-            const { notes, beams, ties } = buildVexVoiceNotes(measure.melody, 'treble');
-            const voice = new vf.Voice({ numBeats: tsNum, beatValue: tsDen })
-              .setStrict(false)
-              .addTickables(notes);
-
-            const formatWidth = Math.max(40, x + measureWidth - trebleStave.getNoteStartX() - 14);
-            new vf.Formatter().joinVoices([voice]).format([voice], formatWidth);
-
-            voice.draw(context, trebleStave);
-            beams.forEach((b) => b.setContext(context).draw());
-            ties.forEach((t) => t.setContext(context).draw());
-
-            measure.melody.forEach((ev, evIdx) => {
-              const onsetIdx = onsetByMeasureStep.get(`${measure.index}:${ev.startStep}`);
-              if (onsetIdx === undefined) return;
-              const note = notes[evIdx];
-              const cx = (note.getNoteHeadBeginX() + note.getNoteHeadEndX()) / 2;
-              nextOnsets.push({
-                onsetIndex: onsetIdx,
-                tick: measure.startTick + ev.startStep * score.stepTicks,
-                x: cx * scale,
-                topY: (trebleY + 18) * scale,
-                staffHeight: 74 * scale,
-                lyricY: (trebleY + 122) * scale,
-              });
-            });
-          } else {
-            // Full 4-part SATB Hymnal Grand Staff (Treble + Center Lyrics + Bass)
-            const bassStave = new vf.Stave(x, bassY, measureWidth);
-            if (isFirstInSystem) {
-              bassStave.addClef('bass').addKeySignature(score.keySignature);
-              if (sysIdx === 0) {
-                bassStave.addTimeSignature(score.timeSignatureLabel);
-              }
-            }
-            if (isVeryLast) {
-              bassStave.setEndBarType(vf.Barline.type.END);
-            }
-            bassStave.setContext(context).draw();
-
-            if (isFirstInSystem) {
-              new vf.StaveConnector(trebleStave, bassStave)
-                .setType(vf.StaveConnector.type.BRACE)
-                .setContext(context)
-                .draw();
-              new vf.StaveConnector(trebleStave, bassStave)
-                .setType(vf.StaveConnector.type.SINGLE_LEFT)
-                .setContext(context)
-                .draw();
-            }
-            if (isLastInSystem) {
-              new vf.StaveConnector(trebleStave, bassStave)
-                .setType(
-                  isVeryLast
-                    ? vf.StaveConnector.type.BOLD_DOUBLE_RIGHT
-                    : vf.StaveConnector.type.SINGLE_RIGHT,
-                )
-                .setContext(context)
-                .draw();
-            }
-
-            const sopBuilt = buildVexVoiceNotes(measure.soprano, 'treble', vf.Stem.UP);
-            const altBuilt = buildVexVoiceNotes(measure.alto, 'treble', vf.Stem.DOWN);
-            const tenBuilt = buildVexVoiceNotes(measure.tenor, 'bass', vf.Stem.UP);
-            const basBuilt = buildVexVoiceNotes(measure.bassVoice, 'bass', vf.Stem.DOWN);
-
-            const sopVoice = new vf.Voice({ numBeats: tsNum, beatValue: tsDen })
-              .setStrict(false)
-              .addTickables(sopBuilt.notes);
-            const altVoice = new vf.Voice({ numBeats: tsNum, beatValue: tsDen })
-              .setStrict(false)
-              .addTickables(altBuilt.notes);
-            const tenVoice = new vf.Voice({ numBeats: tsNum, beatValue: tsDen })
-              .setStrict(false)
-              .addTickables(tenBuilt.notes);
-            const basVoice = new vf.Voice({ numBeats: tsNum, beatValue: tsDen })
-              .setStrict(false)
-              .addTickables(basBuilt.notes);
-
-            const noteStartX = Math.max(
-              trebleStave.getNoteStartX(),
-              bassStave.getNoteStartX(),
-            );
-            trebleStave.setNoteStartX(noteStartX);
-            bassStave.setNoteStartX(noteStartX);
-
-            const formatWidth = Math.max(40, x + measureWidth - noteStartX - 12);
-            new vf.Formatter()
-              .joinVoices([sopVoice, altVoice])
-              .joinVoices([tenVoice, basVoice])
-              .format([sopVoice, altVoice, tenVoice, basVoice], formatWidth);
-
-            sopVoice.draw(context, trebleStave);
-            altVoice.draw(context, trebleStave);
-            tenVoice.draw(context, bassStave);
-            basVoice.draw(context, bassStave);
-
-            sopBuilt.beams.forEach((b) => b.setContext(context).draw());
-            altBuilt.beams.forEach((b) => b.setContext(context).draw());
-            tenBuilt.beams.forEach((b) => b.setContext(context).draw());
-            basBuilt.beams.forEach((b) => b.setContext(context).draw());
-
-            sopBuilt.ties.forEach((t) => t.setContext(context).draw());
-            altBuilt.ties.forEach((t) => t.setContext(context).draw());
-            tenBuilt.ties.forEach((t) => t.setContext(context).draw());
-            basBuilt.ties.forEach((t) => t.setContext(context).draw());
-
-            // Connect cross-barline ties for all 4 voices
-            const handleVoiceCrossTies = (
-              events: ScoreNoteEvent[],
-              notes: InstanceType<typeof vf.StaveNote>[],
-              prevOut: InstanceType<typeof vf.StaveNote> | null,
-            ): InstanceType<typeof vf.StaveNote> | null => {
-              if (events.length > 0 && events[0].tieFromPreviousBar && !events[0].isRest) {
-                drawCrossBarTie(prevOut, notes[0]);
-              }
-              const lastIdx = events.length - 1;
-              if (lastIdx >= 0 && events[lastIdx].tieToNextBar && !events[lastIdx].isRest) {
-                if (isLastInSystem) {
-                  drawCrossBarTie(notes[lastIdx], null);
-                  return null;
-                }
-                return notes[lastIdx];
-              }
-              return null;
-            };
-
-            prevSopranoTieOut = handleVoiceCrossTies(
-              measure.soprano,
-              sopBuilt.notes,
-              prevSopranoTieOut,
-            );
-            prevAltoTieOut = handleVoiceCrossTies(measure.alto, altBuilt.notes, prevAltoTieOut);
-            prevTenorTieOut = handleVoiceCrossTies(measure.tenor, tenBuilt.notes, prevTenorTieOut);
-            prevBassTieOut = handleVoiceCrossTies(
-              measure.bassVoice,
-              basBuilt.notes,
-              prevBassTieOut,
-            );
-
-            // Position centered lyrics & 60fps playhead under Soprano noteheads
-            measure.soprano.forEach((ev, evIdx) => {
-              if (ev.isRest) return;
-              const onsetIdx = onsetByMeasureStep.get(`${measure.index}:${ev.startStep}`);
-              if (onsetIdx === undefined) return;
-              const note = sopBuilt.notes[evIdx];
-              const cx = (note.getNoteHeadBeginX() + note.getNoteHeadEndX()) / 2;
-              nextOnsets.push({
-                onsetIndex: onsetIdx,
-                tick: measure.startTick + ev.startStep * score.stepTicks,
-                x: cx * scale,
-                topY: (trebleY + 18) * scale,
-                staffHeight: (bassY + 86 - (trebleY + 18)) * scale,
-                lyricY: (systemY + HYMNAL_LYRIC_OFFSET_Y) * scale,
-              });
-            });
-          }
-
-          nextBoxes.push({
-            measureIndex: measure.index,
-            displayNumber: sliceStart + colIdx + 1,
-            startSec: measure.startSec,
-            x: x * scale,
-            y: (systemY + 6) * scale,
-            width: measureWidth * scale,
-            height: (systemHeight - 12) * scale,
-          });
-
-          x += measureWidth;
-        });
-      }
-
-      setSvgHeight(displayHeight);
-      setMeasureBoxes(nextBoxes);
-      setOnsetOverlays(nextOnsets);
+    void engraveScoreToSvg(host, {
+      score,
+      visibleMeasures,
+      containerWidth,
+      layoutMode,
+      onsetByMeasureStep,
+    }).then((result) => {
+      if (cancelled) return;
+      setSvgHeight(result.displayHeight);
+      setMeasureBoxes(result.measureBoxes);
+      setOnsetOverlays(result.onsetOverlays);
     });
 
     return () => {
@@ -613,7 +261,6 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
     };
   }, [loadState, score, visibleMeasures, containerWidth, layoutMode, onsetByMeasureStep]);
 
-  // Smoothly keep the active system centered while playing
   useEffect(() => {
     if (!playback.isPlaying || activeOnsetIdx === null) return;
     const activeOverlay = onsetOverlays.find((o) => o.onsetIndex === activeOnsetIdx);
@@ -640,9 +287,7 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
     setSelectedVerse(verseIdx);
     if (score && playback.hymnNumber === hymn.number && playback.status === 'ready') {
       const startMeasure = score.measures[score.stanzaRange[0]];
-      if (startMeasure) {
-        seekToStanzaTick(startMeasure.startTick, verseIdx);
-      }
+      if (startMeasure) seekToStanzaTick(startMeasure.startTick, verseIdx);
     }
   };
 
@@ -684,10 +329,10 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
   return (
     <section
       aria-label={`Sheet music for ${hymn.title}`}
-      className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 sm:p-5"
+      className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 sm:p-4"
     >
-      {/* Compact Header: Key/Time + Hymnal SATB / Melody Only switch */}
-      <div className="flex flex-wrap items-center justify-between gap-2 pb-3">
+      {/* Compact Header: Key/Time + Hymnal SATB / Melody switch */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5">
         <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-[var(--ink-secondary)]">
           {score ? (
             <>
@@ -738,14 +383,14 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
         </div>
       </div>
 
-      {/* Sticky Live Moving Lyrics Strip */}
+      {/* Compact Sticky Live Moving Lyrics Strip */}
       {currentLine && (
-        <div className="sticky top-[57px] z-20 -mx-1 mb-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-recessed)]/95 px-3.5 py-2.5 backdrop-blur-sm">
+        <div className="sticky top-[57px] z-20 -mx-0.5 mb-2.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-recessed)]/95 px-3 py-2 backdrop-blur-sm">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent-primary)]">
                 {isPlayingIntro
-                  ? `Introduction · Verse 1 in ${liveSync?.introRemainingSec ?? 0}s`
+                  ? `Intro · Verse 1 in ${liveSync?.introRemainingSec ?? 0}s`
                   : activeStanzaLyrics.label}
               </span>
               {isPlayingIntro && playback.status === 'ready' && (
@@ -780,7 +425,7 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
           </div>
 
           {isPlayingIntro && (
-            <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[var(--bg-surface)]">
+            <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-[var(--bg-surface)]">
               <div
                 className="h-full rounded-full bg-[var(--accent-primary)] transition-[width] duration-150"
                 style={{ width: `${Math.round((liveSync?.introProgress ?? 0) * 100)}%` }}
@@ -788,7 +433,7 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
             </div>
           )}
 
-          <p className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-sm font-medium leading-snug text-[var(--ink-primary)]">
+          <p className="mt-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-sm font-medium leading-snug text-[var(--ink-primary)]">
             {currentLine.words.map((word, wIdx) => {
               const isCurrentWord =
                 !isPlayingIntro &&
@@ -818,7 +463,7 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
           </p>
 
           {nextLine && (
-            <p className="mt-1 truncate text-xs text-[var(--ink-muted)]">
+            <p className="mt-0.5 hidden truncate text-xs text-[var(--ink-muted)] sm:block">
               {nextLine.words.join(' ')}
             </p>
           )}
@@ -844,7 +489,6 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
           aria-hidden="true"
         />
 
-        {/* Clickable measure hit zones */}
         {measureBoxes.length > 0 && (
           <div className="pointer-events-none absolute inset-0">
             {measureBoxes.map((box) => (
@@ -868,7 +512,6 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
           </div>
         )}
 
-        {/* Smooth 60fps Moving Playhead across Treble + Bass */}
         {activeOverlay && !isPlayingIntro && (
           <div
             aria-hidden="true"
@@ -881,7 +524,6 @@ export function SheetMusicView({ hymn }: SheetMusicViewProps) {
           />
         )}
 
-        {/* Moving Lyrics (centered between Treble & Bass in SATB mode, or below Treble in Melody mode) */}
         {onsetOverlays.length > 0 && (
           <div className="pointer-events-none absolute inset-0">
             {onsetOverlays.map((ov) => {

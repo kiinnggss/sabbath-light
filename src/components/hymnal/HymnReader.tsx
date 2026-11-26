@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {
   ArrowLeft,
   BookOpenText,
@@ -11,6 +10,7 @@ import {
 } from '@phosphor-icons/react';
 import type { HymnEntry } from '../../data/hymnalTypes';
 import type { StudyNote } from '../../lib/offlineDb';
+import type { HymnViewMode } from '../../lib/router';
 import { TunePlayerBar } from '../audio/TunePlayerBar';
 import { DotMatrixBadge } from './DotMatrixBadge';
 import { HymnStoryView } from './HymnStoryView';
@@ -18,6 +18,8 @@ import { SheetMusicView } from './SheetMusicView';
 
 interface HymnReaderProps {
   hymn: HymnEntry;
+  viewMode: HymnViewMode;
+  onViewModeChange: (mode: HymnViewMode) => void;
   isFavorite: boolean;
   note?: StudyNote;
   onToggleFavorite: (number: number) => void;
@@ -28,6 +30,8 @@ interface HymnReaderProps {
 
 export function HymnReader({
   hymn,
+  viewMode,
+  onViewModeChange,
   isFavorite,
   note,
   onToggleFavorite,
@@ -35,10 +39,8 @@ export function HymnReader({
   onBack,
   onNavigateNumber,
 }: HymnReaderProps) {
-  const [viewMode, setViewMode] = useState<'lyrics' | 'sheet' | 'story'>('lyrics');
-
   return (
-    <div className="pb-56">
+    <div className={viewMode === 'sheet' ? 'pb-32' : 'pb-56'}>
       {/* Top Reader Controls */}
       <div className="flex items-center justify-between gap-2 py-3">
         <button
@@ -133,7 +135,7 @@ export function HymnReader({
             type="button"
             role="tab"
             aria-selected={viewMode === 'lyrics'}
-            onClick={() => setViewMode('lyrics')}
+            onClick={() => onViewModeChange('lyrics')}
             className={`tactile-btn flex h-10 items-center justify-center gap-1.5 rounded-lg text-xs font-bold ${
               viewMode === 'lyrics'
                 ? 'bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-sm'
@@ -147,7 +149,7 @@ export function HymnReader({
             type="button"
             role="tab"
             aria-selected={viewMode === 'sheet'}
-            onClick={() => setViewMode('sheet')}
+            onClick={() => onViewModeChange('sheet')}
             className={`tactile-btn flex h-10 items-center justify-center gap-1.5 rounded-lg text-xs font-bold ${
               viewMode === 'sheet'
                 ? 'bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-sm'
@@ -161,7 +163,7 @@ export function HymnReader({
             type="button"
             role="tab"
             aria-selected={viewMode === 'story'}
-            onClick={() => setViewMode('story')}
+            onClick={() => onViewModeChange('story')}
             className={`tactile-btn flex h-10 items-center justify-center gap-1.5 rounded-lg text-xs font-bold ${
               viewMode === 'story'
                 ? 'bg-[var(--accent-primary)] text-[var(--ink-on-accent)] shadow-sm'
@@ -233,8 +235,8 @@ export function HymnReader({
         )}
       </div>
 
-      {/* Tone.js Audio Bar ONLY for Hymns #1-#695 */}
-      <TunePlayerBar hymn={hymn} />
+      {/* Pre-rendered WAV Audio Bar ONLY for Hymns #1-#695 */}
+      <TunePlayerBar hymn={hymn} dockBottom={viewMode === 'sheet'} />
     </div>
   );
 }
